@@ -1,0 +1,24 @@
+{
+  "name": "papertrail",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "dev": "corepack pnpm --filter @papertrail/web dev",
+    "lint": "eslint . --max-warnings=0",
+    "test": "corepack pnpm -r --if-present test",
+    "typecheck": "corepack pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@papertrail/config": "workspace:*",
+    "@eslint/js": "^9.38.0",
+    "@next/eslint-plugin-next": "^15.5.6",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.38.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vitest": "^3.2.4"
+  }
+}

@@ -50,6 +50,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+coverage/
 
 # Translations
 *.mo
@@ -129,12 +130,24 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Local application data
+.data/
+uploads/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
 
 # Spyder project settings
 .spyderproject
