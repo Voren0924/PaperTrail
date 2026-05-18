@@ -8,9 +8,9 @@ The MVP should prove one core workflow end to end:
 
 1. A user uploads one or more CS paper PDFs.
 2. The system parses each PDF into text, metadata, sections, chunks, and page-aware citations.
-3. The user asks questions about a paper or a small paper collection.
+3. The user asks questions about one paper.
 4. The system retrieves relevant chunks, answers with citations, and exposes enough evidence for the user to verify the answer.
-5. The user can compare selected papers and create structured notes from cited material.
+5. Later milestones extend this into multi-paper comparison and structured notes.
 
 The product must be conservative, inspectable, and maintainable. AI output should never be treated as authoritative without source references.
 
@@ -250,7 +250,7 @@ Important boundaries:
 10. Answer, cited claims, citations, and retrieval metadata are stored with the `ChatMessage`.
 11. Frontend renders answer, citation chips, and evidence previews.
 
-### Notes
+### Notes Post-MVP
 
 1. User selects one paper, multiple papers, or chat answers.
 2. Notes service retrieves cited chunks and paper metadata.
@@ -884,9 +884,11 @@ Response:
 }
 ```
 
-### Compare
+### Compare Post-MVP
 
 `POST /api/compare`
+
+This endpoint is planned for Milestone 4. Do not implement it before the single-paper cited Q&A flow is stable.
 
 Request:
 
@@ -928,9 +930,11 @@ Response:
 }
 ```
 
-### Notes
+### Notes Post-MVP
 
 `POST /api/notes`
+
+These endpoints are planned for Milestone 4. Do not implement them before the single-paper cited Q&A flow is stable.
 
 Request:
 
@@ -1020,9 +1024,9 @@ Recommended routes:
 - `/register`: registration form.
 - `/library`: paper library with upload control, status filters, and search.
 - `/papers/[paperId]`: paper detail, metadata, sections, parsing status, and single-paper chat.
-- `/compare`: selected paper comparison workspace.
-- `/notes`: notes list.
-- `/notes/[noteId]`: note editor with citation panel.
+- `/compare`: selected paper comparison workspace. Stretch after MVP.
+- `/notes`: notes list. Stretch after MVP.
+- `/notes/[noteId]`: note editor with citation panel. Stretch after MVP.
 - `/settings`: account and model/provider settings for development.
 
 Core UI components:
@@ -1035,8 +1039,8 @@ Core UI components:
 - `ChatPanel`: messages, input, loading state, and retry affordance.
 - `CitationChip`: compact citation label that opens evidence preview.
 - `EvidenceDrawer`: cited quote, page range, chunk text, paper metadata.
-- `CompareMatrix`: rows for comparison dimensions and columns for papers.
-- `NoteEditor`: markdown editor plus citation sidebar.
+- `CompareMatrix`: rows for comparison dimensions and columns for papers. Stretch after MVP.
+- `NoteEditor`: markdown editor plus citation sidebar. Stretch after MVP.
 
 Frontend rules:
 
@@ -1287,14 +1291,14 @@ Testing should match risk:
   - paper not ready
   - chat answer with citations
   - citation drawer
-  - compare matrix
+  - compare matrix after compare moves into active scope
 - Playwright smoke tests:
   - register or log in
   - upload fixture PDF
   - wait for ready state
   - ask a question
   - open citation evidence
-  - create a note
+  - create a note after notes move into active scope
 
 Required test data:
 
@@ -1350,7 +1354,7 @@ pnpm typecheck
 Local development behavior:
 
 - Uploaded files go under `.data/uploads`, which must be gitignored.
-- Development auth may be simple but must not hard-code a shared global user.
+- Development auth must use the same cookie-session interface as the app. Any dev shortcut must be guarded by an environment flag and must not bypass ownership checks.
 - Worker can run as a separate process during development.
 - Seed scripts should create only safe demo data and must not require external paper downloads.
 
@@ -1379,6 +1383,21 @@ Future Codex agents must follow these rules:
 ## 19. Task Breakdown For Parallel Codex Threads
 
 Parallel work should use clear ownership boundaries. Threads must not edit each other's files without coordination.
+
+Recommended dependency order:
+
+1. Thread A: Monorepo Foundation.
+2. Thread B: Database And Prisma.
+3. Thread C: Auth And API Foundation.
+4. Thread D: Paper Upload And Storage.
+5. Thread E: Worker, PDF Parsing, And Chunking.
+6. Thread F: Embeddings And Retrieval.
+7. Thread G: Grounded Answering And Chat API.
+8. Thread H: Frontend Application UI, with early UI limited to upload, paper detail, status, chat, and citation drawer.
+9. Thread J: Evaluation, QA, And Documentation should start once parsing and retrieval interfaces exist, then continue throughout.
+10. Thread I: Notes And Comparison starts only after Milestone 2 is stable.
+
+Do not run all threads at once. Frontend work can begin early with mocked contracts, but broad UI implementation before API and schema stabilization is expected to cause rework.
 
 ### Thread A: Monorepo Foundation
 
@@ -1519,7 +1538,8 @@ Ownership:
 
 Deliverables:
 
-- single-paper and multi-paper chat.
+- single-paper chat for MVP.
+- multi-paper chat after Milestone 2 is stable.
 - valid citation storage.
 - retry-on-invalid-citations behavior.
 - tests for grounded answer failure modes.
@@ -1538,12 +1558,12 @@ Ownership:
 - paper detail page
 - chat panel
 - citation drawer
-- compare page
-- notes pages
+- compare page after Milestone 2
+- notes pages after Milestone 2
 
 Deliverables:
 
-- user-facing MVP workflow.
+- user-facing MVP workflow for upload, paper detail, single-paper chat, and citation evidence.
 - loading, error, empty, and not-ready states.
 - citation evidence interactions.
 
@@ -1595,24 +1615,34 @@ Boundaries:
 
 ## 20. Acceptance Criteria For MVP
 
-The MVP is acceptable when all of the following are true:
+The MVP is acceptable when all required criteria are true. Stretch criteria are useful but must not block the first MVP.
+
+Required:
 
 - A new user can register, log in, and reach the library.
 - A user can upload a born-digital CS paper PDF.
 - The paper transitions from uploaded/parsing to ready without manual database edits.
-- The paper detail page shows extracted title, authors when available, abstract when available, sections, and status.
+- The paper detail page shows extracted title when available, abstract when available, page count, parsing diagnostics, and status.
+- Page-level text is extracted and viewable in a developer-friendly detail area or preview.
+- Chunks are created with page ranges, content hashes, and chunk version.
+- Embeddings are stored for ready paper chunks.
 - A user can ask a question about one ready paper.
 - The assistant answer includes at least one validated citation for factual paper-content claims.
 - Clicking a citation shows paper title, page range, quote, and chunk evidence.
-- A user can ask a question across multiple selected ready papers.
-- A user can compare 2-5 papers with cited evidence.
-- A user can generate and edit a research note with citations.
+- Assistant cited claims are stored and linked to citations.
 - Failed parsing states are visible and retryable.
 - Scanned or low-text PDFs are detected and handled with a clear unsupported or low-confidence message.
 - API endpoints enforce user ownership.
 - Uploaded files are not publicly accessible without authorization.
 - Unit tests cover parsing helpers, chunking, citation validation, API validation, and ownership checks.
-- At least one Playwright smoke test covers the main workflow.
+- At least one Playwright smoke test covers upload, ready status, single-paper chat, and citation drawer.
 - The RAG evaluation script reports retrieval hit rate and citation validity on local fixtures.
 - Local setup documentation is sufficient for a student developer to run the app and worker.
 - Future Codex agents can work from this document without needing undocumented architectural assumptions.
+
+Stretch after MVP:
+
+- A user can ask a question across multiple selected ready papers.
+- A user can compare 2-5 papers with cited evidence.
+- A user can generate and edit a research note with citations.
+- Playwright coverage includes compare and note workflows.
