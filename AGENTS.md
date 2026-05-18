@@ -5,9 +5,15 @@
 - Always read docs/DEVELOPMENT_PLAN.md before making changes.
 - Do not push directly to main.
 - Work on branches named codex/<task-name>.
+- At the end of each completed Codex task, run `scripts/codex-finish.ps1` to commit and push changes to the current `codex/<task-name>` branch.
+- The finish script must only be used from an existing `codex/<task-name>` branch. It intentionally refuses to run on `main`, `master`, or any non-`codex/` branch.
+- Use `scripts/codex-finish.ps1 -Message "clear commit message"` when a task-specific commit message is useful. Without `-Message`, the script uses a safe default based on the current branch name.
+- The finish script runs `git status`, refuses blocked secret/upload paths, commits changes, and pushes only the current branch to `origin`.
+- The finish script must not merge pull requests, delete branches, or change repository settings.
 - Keep changes scoped to the assigned task.
 - Do not introduce new libraries without updating docs/DEVELOPMENT_PLAN.md.
 - Do not commit secrets, API keys, .env files, or credentials.
+- Do not commit `.env`, `.env.local`, `.data`, upload directories, private keys, API keys, credentials, or secrets.
 - Do not modify GitHub repository settings.
 - Do not merge Pull Requests.
 
@@ -24,6 +30,8 @@ Frontend:
 - npm run lint
 - npm run typecheck
 - npm test if configured
+
+If no relevant test command exists yet, state that explicitly in the final task summary before running the finish script.
 
 ## Pull Request Requirements
 
