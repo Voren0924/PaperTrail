@@ -1,5 +1,4 @@
 param(
-    [string]$TaskName = "",
     [string]$Message = "",
     [switch]$SkipPush
 )
@@ -10,21 +9,6 @@ function Stop-WithMessage {
     param([string]$Text)
     Write-Error $Text
     exit 1
-}
-
-function Convert-ToSlug {
-    param([string]$Text)
-
-    $slug = $Text.Trim().ToLowerInvariant()
-    $slug = $slug -replace "[^a-z0-9._-]+", "-"
-    $slug = $slug -replace "^-+", ""
-    $slug = $slug -replace "-+$", ""
-
-    if ([string]::IsNullOrWhiteSpace($slug)) {
-        Stop-WithMessage "TaskName must contain at least one letter or number."
-    }
-
-    return $slug
 }
 
 function Get-GitOutput {
@@ -38,6 +22,84 @@ function Get-GitOutput {
     return $output
 }
 
+function Get-ChangedFiles {
+    $entries = @(Get-GitOutput @("status", "--porcelain"))
+    if ($entries.Count -eq 0) {
+        return @()
+    }
+
+    $files = New-Object System.Collections.Generic.List[string]
+
+    foreach ($entry in $entries) {
+        if ($entry.Length -le 3) {
+            continue
+        }
+
+        $pathPart = $entry.Substring(3)
+
+        if ($pathPart -like "* -> *") {
+            $paths = $pathPart -split " -> "
+            foreach ($path in $paths) {
+                if (-not [string]::IsNullOrWhiteSpace($path)) {
+                    $files.Add($path.Replace("\", "/"))
+                }
+            }
+            continue
+        }
+
+        $files.Add($pathPart.Replace("\", "/"))
+    }
+
+    return @($files | Sort-Object -Unique)
+}
+
+function Assert-NoBlockedFiles {
+    param([string[]]$Files)
+
+    $blockedPathPatterns = @(
+        "(^|/)\.env($|[./])",
+        "(^|/)\.env\.local$",
+        "(^|/)\.data($|/)",
+        "(^|/)uploads($|/)",
+        "\.pem$",
+        "\.key$",
+        "id_rsa$",
+        "id_ed25519$",
+        "(^|/)(credentials|secrets?)($|[./_-])",
+        "(^|/).*(api[_-]?keys?|secrets?|tokens?|credentials).*$"
+    )
+
+    foreach ($file in $Files) {
+        foreach ($pattern in $blockedPathPatterns) {
+            if ($file -match $pattern) {
+                Stop-WithMessage "Refusing to commit possible secret or upload file: $file"
+            }
+        }
+    }
+}
+
+function Assert-NoCredentialLiterals {
+    param([string[]]$Files)
+
+    $credentialPatterns = @(
+        "(?i)(api[_-]?key|secret|access[_-]?token|refresh[_-]?token|private[_-]?key)\s*[:=]\s*['""]?[A-Za-z0-9_./+=-]{16,}",
+        "(?i)(password|passwd|pwd)\s*[:=]\s*['""]?[^'""]{12,}"
+    )
+
+    foreach ($file in $Files) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            continue
+        }
+
+        foreach ($pattern in $credentialPatterns) {
+            $matches = Select-String -LiteralPath $file -Pattern $pattern -ErrorAction SilentlyContinue
+            if ($matches) {
+                Stop-WithMessage "Refusing to commit possible credential literal in: $file"
+            }
+        }
+    }
+}
+
 $repoRoot = (Get-GitOutput @("rev-parse", "--show-toplevel")).Trim()
 Set-Location $repoRoot
 
@@ -46,56 +108,22 @@ if ([string]::IsNullOrWhiteSpace($currentBranch)) {
     Stop-WithMessage "Detached HEAD is not supported. Switch to a codex/<task-name> branch first."
 }
 
-if ($currentBranch -eq "main" -or $currentBranch -eq "master") {
-    if ([string]::IsNullOrWhiteSpace($TaskName)) {
-        Stop-WithMessage "Refusing to commit or push from $currentBranch. Re-run with -TaskName <task-name> to create a codex/<task-name> branch."
-    }
-
-    $currentBranch = "codex/$(Convert-ToSlug $TaskName)"
-    Get-GitOutput @("switch", "-c", $currentBranch) | Out-Null
-}
-
 if (-not $currentBranch.StartsWith("codex/")) {
-    Stop-WithMessage "Current branch is '$currentBranch'. Expected a branch named codex/<task-name>."
+    Stop-WithMessage "Current branch is '$currentBranch'. Refusing to run unless the branch starts with codex/."
 }
+
+Write-Host "Current branch: $currentBranch"
+Get-GitOutput @("status", "--short", "--branch") | Out-Host
 
 $status = @(Get-GitOutput @("status", "--porcelain"))
 if ($status.Count -eq 0) {
     Write-Host "No changes to commit."
-    if (-not $SkipPush) {
-        Get-GitOutput @("push", "-u", "origin", $currentBranch) | Out-Host
-    }
     exit 0
 }
 
-$blockedPatterns = @(
-    "(^|/)\.env($|[./])",
-    "\.pem$",
-    "\.key$",
-    "id_rsa$",
-    "id_ed25519$",
-    "credentials",
-    "secret"
-)
-
-$changedFiles = @(
-    Get-GitOutput @("status", "--porcelain", "-z") -split "`0" |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        ForEach-Object {
-            $entry = $_
-            if ($entry.Length -gt 3) {
-                $entry.Substring(3).Replace("\", "/")
-            }
-        }
-)
-
-foreach ($file in $changedFiles) {
-    foreach ($pattern in $blockedPatterns) {
-        if ($file -match $pattern) {
-            Stop-WithMessage "Refusing to commit possible secret file: $file"
-        }
-    }
-}
+$changedFiles = @(Get-ChangedFiles)
+Assert-NoBlockedFiles -Files $changedFiles
+Assert-NoCredentialLiterals -Files $changedFiles
 
 Get-GitOutput @("add", "--all") | Out-Null
 
@@ -104,6 +132,9 @@ if ($staged.Count -eq 0) {
     Write-Host "No staged changes to commit."
     exit 0
 }
+
+Assert-NoBlockedFiles -Files $staged
+Assert-NoCredentialLiterals -Files $staged
 
 if ([string]::IsNullOrWhiteSpace($Message)) {
     $branchTask = $currentBranch.Substring("codex/".Length)
