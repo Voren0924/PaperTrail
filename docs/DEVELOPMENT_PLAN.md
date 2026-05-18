@@ -244,10 +244,11 @@ Important boundaries:
 4. Retrieval service searches `PaperChunk` by vector similarity and filters by selected paper IDs.
 5. Optional reranking sorts candidates by relevance, recency in context, and citation usefulness.
 6. Answer service sends the question and selected chunks to the LLM.
-7. LLM must answer only from supplied context and attach chunk citation IDs.
+7. LLM must answer only from supplied context and return structured `answer` plus `citedClaims`.
 8. Backend validates that returned citation IDs exist in the retrieved context.
-9. Answer and citations are stored as a `ChatMessage`.
-10. Frontend renders answer, citation chips, and evidence previews.
+9. Backend derives quote previews from stored chunks.
+10. Answer, cited claims, citations, and retrieval metadata are stored with the `ChatMessage`.
+11. Frontend renders answer, citation chips, and evidence previews.
 
 ### Notes
 
@@ -358,6 +359,11 @@ Index:
 - `tokenCount`: integer.
 - `startPage`: integer.
 - `endPage`: integer.
+- `charStart`: nullable integer. Character offset in the concatenated normalized paper text.
+- `charEnd`: nullable integer. Character offset in the concatenated normalized paper text.
+- `pageTextOffsets`: nullable JSON. Maps page numbers to local start/end offsets for citation debugging.
+- `contentHash`: string. Hash of normalized chunk text.
+- `chunkVersion`: integer. Increment when chunking rules change.
 - `embedding`: vector column.
 - `embeddingModel`: string.
 - `createdAt`: timestamp.
@@ -365,6 +371,8 @@ Index:
 Indexes:
 
 - `(paperId, chunkIndex)`
+- `(paperId, chunkVersion)`
+- `(paperId, contentHash)`
 - vector index on `embedding`
 
 ### PaperReference
@@ -407,8 +415,15 @@ Unique index:
 - `id`: UUID primary key.
 - `chatSessionId`: foreign key to `ChatSession`.
 - `role`: enum: `USER`, `ASSISTANT`, `SYSTEM`.
+- `status`: enum: `PENDING`, `SUCCEEDED`, `FAILED`.
 - `content`: text.
 - `model`: nullable string.
+- `promptVersion`: nullable string.
+- `temperature`: nullable float.
+- `retrievalMetadata`: nullable JSON. Store retrieved chunk IDs, scores, selected paper IDs, and final context chunk IDs.
+- `providerRequestId`: nullable string.
+- `llmTraceId`: nullable string.
+- `errorCode`: nullable string.
 - `createdAt`: timestamp.
 
 Index:
@@ -429,6 +444,18 @@ Index:
 Index:
 
 - `(chatMessageId)`
+
+### ChatCitedClaim
+
+- `id`: UUID primary key.
+- `chatMessageId`: foreign key to `ChatMessage`.
+- `claimText`: text. One factual claim extracted from the assistant answer.
+- `citationIds`: JSON array of `ChatCitation.id` values supporting the claim.
+- `position`: integer.
+
+Index:
+
+- `(chatMessageId, position)`
 
 ### ResearchNote
 
@@ -455,9 +482,14 @@ Index:
 - `type`: enum: `PARSE_PAPER`, `EMBED_PAPER`, `RETRY_PAPER`.
 - `status`: enum: `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`.
 - `paperId`: nullable foreign key to `Paper`.
+- `payload`: JSON. Store job-specific input such as paper ID, parser version, or chunk version.
 - `attempts`: integer.
 - `maxAttempts`: integer.
 - `errorMessage`: nullable text.
+- `lockedAt`: nullable timestamp.
+- `lockedBy`: nullable string.
+- `runAfter`: timestamp.
+- `lastHeartbeatAt`: nullable timestamp.
 - `createdAt`: timestamp.
 - `updatedAt`: timestamp.
 - `startedAt`: nullable timestamp.
@@ -466,6 +498,8 @@ Index:
 Index:
 
 - `(status, createdAt)`
+- `(status, runAfter)`
+- `(lockedAt)`
 
 ## 9. API Contract
 
@@ -480,6 +514,104 @@ All API responses should use JSON. Errors should follow one consistent shape:
   }
 }
 ```
+
+API conventions:
+
+- `200`: successful read or mutation with response body.
+- `201`: resource created.
+- `202`: asynchronous work accepted, such as retrying parsing.
+- `204`: successful delete with no response body, unless the endpoint returns `{ "ok": true }` for consistency.
+- `400`: malformed JSON, invalid multipart request, or unsupported parameters.
+- `401`: unauthenticated.
+- `403`: authenticated but not allowed to access the resource.
+- `404`: resource does not exist or does not belong to the user.
+- `409`: resource state conflict, such as chat against a paper that is not ready.
+- `413`: upload exceeds `MAX_UPLOAD_MB`.
+- `422`: validation failed with field-level details.
+- `429`: local rate or usage limit exceeded.
+- `500`: unexpected server error.
+
+Pagination:
+
+- List endpoints must support `limit` and `cursor` once result sets can grow.
+- Default `limit` should be 20.
+- Maximum `limit` should be 100.
+- Responses should include `nextCursor` when more results are available.
+
+Sorting:
+
+- Paper list default sort is newest first.
+- Supported paper sort keys for MVP: `createdAt`, `title`, `status`.
+- Unsupported sort keys return `422`.
+
+Validation error shape:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed.",
+    "details": {
+      "fields": {
+        "file": "PDF file is required."
+      }
+    }
+  }
+}
+```
+
+Auth error shape:
+
+```json
+{
+  "error": {
+    "code": "UNAUTHENTICATED",
+    "message": "Sign in is required.",
+    "details": {}
+  }
+}
+```
+
+Paper not ready error shape:
+
+```json
+{
+  "error": {
+    "code": "PAPER_NOT_READY",
+    "message": "Paper is still being processed.",
+    "details": {
+      "paperId": "uuid",
+      "status": "PARSING"
+    }
+  }
+}
+```
+
+Upload limit error shape:
+
+```json
+{
+  "error": {
+    "code": "UPLOAD_TOO_LARGE",
+    "message": "PDF exceeds the configured upload size limit.",
+    "details": {
+      "maxUploadMb": 50
+    }
+  }
+}
+```
+
+Chat streaming decision:
+
+- MVP chat is non-streaming for simplicity and reliable citation validation.
+- Streaming may be added later only with an explicit event contract such as `text_delta`, `citation_delta`, `error`, and `final_message`.
+- If streaming is added, citations must still be validated before the final assistant message is persisted as succeeded.
+
+Retry idempotency:
+
+- `POST /api/papers/:paperId/retry` should not enqueue duplicate active jobs for the same paper.
+- If a retry job is already `QUEUED` or `RUNNING`, return the existing job with `200`.
+- If a new retry job is created, return `202`.
 
 ### Auth
 
@@ -580,6 +712,9 @@ Query parameters:
 
 - `status`: optional paper status.
 - `q`: optional search query over title, authors, and abstract.
+- `limit`: optional page size, default 20.
+- `cursor`: optional pagination cursor.
+- `sort`: optional sort key: `createdAt`, `title`, or `status`.
 
 Response:
 
@@ -596,7 +731,8 @@ Response:
       "pageCount": 15,
       "createdAt": "2026-05-18T00:00:00.000Z"
     }
-  ]
+  ],
+  "nextCursor": null
 }
 ```
 
@@ -736,6 +872,12 @@ Response:
         "pageStart": 3,
         "pageEnd": 3,
         "quote": "Evidence quote"
+      }
+    ],
+    "citedClaims": [
+      {
+        "claimText": "One factual claim from the answer.",
+        "citationLabels": ["[Paper Title, p. 3]"]
       }
     ]
   }
@@ -980,9 +1122,10 @@ Pipeline:
    - keep page diversity where possible
 6. Select top 6-10 chunks for answer context.
 7. Ask the LLM to answer using only supplied chunks.
-8. Require structured citation references to supplied chunk IDs.
+8. Require structured `answer` and `citedClaims` references to supplied chunk IDs.
 9. Validate citations server-side.
-10. Store answer, citations, and retrieval metadata.
+10. Derive quote previews from stored chunk text.
+11. Store answer, cited claims, citations, and retrieval metadata.
 
 Prompt constraints:
 
@@ -1020,6 +1163,26 @@ MVP parsing should be deterministic and debuggable:
 
 Parsing output should include confidence flags. Do not block paper readiness just because title, authors, venue, or references are imperfect.
 
+Parsing quality gates:
+
+- Calculate per-page character density. Pages with very low extracted text density should be flagged as likely scanned or extraction-failed.
+- If most pages are below the configured density threshold, mark the paper `FAILED` or `READY_WITH_WARNINGS` if that status is added later; do not silently continue into RAG.
+- Run a basic text-order sanity check for multi-column PDFs. If extraction produces repeated single-character lines, obvious column interleaving, or severe ordering artifacts, store a parser warning.
+- Remove repeated headers and footers when the same normalized line appears on many pages.
+- Apply conservative dehyphenation for line-end hyphen breaks, but do not rewrite technical tokens aggressively.
+- Normalize ligatures where practical, for example `fi` and `fl` ligatures.
+- Preserve figure and table captions as normal text when they are extractable.
+- Exclude references from default QA chunks unless the user asks about references, related work bibliography, or citation metadata.
+- Store parser warnings in paper status metadata or a future `PaperParseDiagnostic` table if warnings become complex.
+
+Minimum acceptable MVP parser output:
+
+- For a born-digital CS paper, most non-reference pages should have non-empty text.
+- Page numbers on chunks must match the source page range.
+- The abstract should be extracted when a clear `Abstract` heading exists.
+- The paper may be marked ready even if venue/year/reference metadata is missing.
+- The paper must not become ready for Q&A if no meaningful chunks can be produced.
+
 ### Chunking
 
 Chunking requirements:
@@ -1031,6 +1194,7 @@ Chunking requirements:
 - Preserve start page and end page for every chunk.
 - Include section title in chunk metadata but avoid duplicating it excessively in text.
 - Skip chunks with very low information content, such as page headers or isolated references, unless needed for references extraction.
+- Store content hashes and chunk versions so old citations can be debugged after chunking rules change.
 
 Chunk text shape passed to the LLM:
 
@@ -1052,9 +1216,13 @@ Rules:
 - Every assistant answer about paper content must include at least one citation unless it explicitly says the context is insufficient.
 - Citations must point to stored `PaperChunk` records.
 - Citation labels should be generated by the backend from paper metadata and page numbers.
-- The LLM may choose chunk IDs, but the backend must validate them.
+- The LLM may choose chunk IDs from the supplied context, but the backend must validate them.
+- The LLM must return structured output with `answer` and `citedClaims`.
+- Each cited claim must bind a factual claim from the answer to one or more supplied chunk IDs.
 - If the LLM returns no valid citations for a factual answer, the backend should retry once with stricter instructions.
 - If retry fails, return a controlled error or an answer that states insufficient grounded evidence.
+- The backend should derive quote previews from stored chunk text. Do not trust LLM-generated quotes.
+- Citation validation proves that a citation is legal, not that the answer is fully supported. The cited-claim structure is required so reviewers and future evaluation code can inspect support claim by claim.
 
 Evidence display:
 
@@ -1062,6 +1230,7 @@ Evidence display:
 - On click, show quote, full chunk text, page range, paper title, and section.
 - Quote should be a short extract from the cited chunk.
 - The quote must be derived from stored chunk text, not newly invented by the LLM.
+- The evidence drawer must show the raw chunk text, not only a quote preview.
 
 Known limitation:
 
