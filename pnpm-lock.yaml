@@ -44,6 +44,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@papertrail/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@papertrail/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -63,6 +66,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.2
         version: 19.2.3(@types/react@19.2.14)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@22.19.19)(jiti@2.7.0)
 
   packages/config: {}
 
