@@ -128,6 +128,7 @@ Use a conservative TypeScript-first stack:
   - S3-compatible abstraction for future production.
 - PDF parsing:
   - Primary: `pdf-parse` or `pdfjs-dist` for text and page extraction.
+  - Thread E implementation uses `pdf-parse` for TypeScript-friendly page text extraction in the worker.
   - Optional later: GROBID for metadata/reference extraction if needed.
 - Background jobs:
   - MVP: simple database-backed job records and a worker process.
