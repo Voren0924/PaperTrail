@@ -11,7 +11,8 @@
     "dev": "corepack pnpm --filter @papertrail/web dev",
     "lint": "eslint . --max-warnings=0",
     "test": "corepack pnpm -r --if-present test",
-    "typecheck": "corepack pnpm -r --if-present typecheck"
+    "typecheck": "corepack pnpm -r --if-present typecheck",
+    "worker": "corepack pnpm --filter @papertrail/web worker"
   },
   "devDependencies": {
     "@papertrail/config": "workspace:*",
