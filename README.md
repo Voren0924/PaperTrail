@@ -7,12 +7,11 @@ answers into reusable research notes.
 
 ## Current Status
 
-Thread A, the monorepo foundation, is complete. The repository currently
-contains the Next.js app shell, shared workspace configuration, and baseline
-lint, typecheck, and test commands.
+Thread A, the monorepo foundation, Thread B, the database/Prisma foundation, and
+Thread C, the auth/API foundation, are complete.
 
-Database, authentication, PDF ingestion, RAG, and grounded answering are planned
-work and are not implemented yet unless they appear in a later merged change.
+Paper upload and local storage APIs are implemented in Thread D. PDF parsing,
+RAG, grounded answering, comparison, and notes remain planned work.
 
 ## Repository Structure
 
@@ -22,7 +21,7 @@ apps/
 packages/
   config/           Shared ESLint, Prettier, and TypeScript configuration
   shared/           Shared TypeScript utilities and types
-  db/               Planned database package for Prisma and database helpers
+  db/               Prisma schema, migrations, and database helpers
 docs/
   DEVELOPMENT_PLAN.md
 scripts/
@@ -39,9 +38,8 @@ exist on every branch until that work is merged.
 - pnpm, managed through Corepack.
 - Docker Desktop or a local PostgreSQL installation for later database work.
 
-PostgreSQL and pgvector are planned for the MVP database/RAG milestones, but the
-current foundation branch does not require a database to run the baseline app
-shell.
+PostgreSQL and pgvector are required for database-backed API routes. Unit tests
+for validation and storage behavior do not require a live database.
 
 ## Developer Setup
 
@@ -74,6 +72,24 @@ Run tests:
 ```powershell
 corepack pnpm test
 ```
+
+## Local Upload Storage
+
+Uploaded PDFs are stored through a storage service abstraction. The MVP adapter
+writes files to local disk and stores only metadata plus a storage key in
+PostgreSQL.
+
+Configure local uploads with:
+
+```text
+LOCAL_STORAGE_DIR=.data/uploads
+MAX_UPLOAD_MB=50
+```
+
+`LOCAL_STORAGE_DIR` is resolved relative to the web app process working
+directory when a relative path is provided. Keep it outside publicly served
+directories such as `apps/web/public`. The default `.data/uploads` path is
+already ignored by Git, and uploaded PDFs must not be committed.
 
 ## Codex Workflow
 
