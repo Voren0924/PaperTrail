@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import { getPrismaClient } from "@papertrail/db";
 
+import { createConfiguredEmbeddingService, type EmbedPaperInput } from "../embeddings/embeddingService";
 import {
   createIngestionPipeline,
   createLocalPdfStorageReader,
@@ -23,7 +24,12 @@ export async function startWorker(options: WorkerOptions = {}): Promise<void> {
     createPrismaIngestionRepository(prisma),
     createLocalPdfStorageReader()
   );
-  const jobRunner = createJobRunner(createPrismaJobRunnerRepository(prisma), pipeline);
+  const embeddingService = {
+    embedPaper(input: EmbedPaperInput) {
+      return createConfiguredEmbeddingService(prisma).embedPaper(input);
+    }
+  };
+  const jobRunner = createJobRunner(createPrismaJobRunnerRepository(prisma), pipeline, embeddingService);
 
   while (!options.stopSignal?.aborted) {
     const result = await jobRunner.runNext();

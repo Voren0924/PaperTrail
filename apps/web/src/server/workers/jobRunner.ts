@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@papertrail/db";
 
+import type { EmbedPaperInput, EmbedPaperResult } from "../embeddings/embeddingService";
 import type { RunIngestionPipelineInput, RunIngestionPipelineResult } from "../services/ingestionPipeline";
 
 export type IngestionJob = {
   id: string;
-  type: "PARSE_PAPER";
+  type: "PARSE_PAPER" | "EMBED_PAPER";
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
   paperId: string | null;
   payload: unknown;
@@ -15,13 +16,17 @@ export type IngestionJob = {
 };
 
 export type JobRunnerRepository = {
-  claimNextIngestionJob(workerId: string, now: Date): Promise<IngestionJob | null>;
+  claimNextJob(workerId: string, now: Date): Promise<IngestionJob | null>;
   markJobSucceeded(jobId: string, message: string, now: Date): Promise<void>;
   markJobFailed(job: IngestionJob, errorMessage: string, now: Date): Promise<void>;
 };
 
 export type IngestionPipelineHandler = {
   run(input: RunIngestionPipelineInput): Promise<RunIngestionPipelineResult>;
+};
+
+export type EmbeddingJobHandler = {
+  embedPaper(input: EmbedPaperInput): Promise<EmbedPaperResult>;
 };
 
 export type JobRunnerOptions = {
@@ -37,6 +42,7 @@ export type RunNextJobResult =
 export function createJobRunner(
   repository: JobRunnerRepository,
   ingestionPipeline: IngestionPipelineHandler,
+  embeddingService: EmbeddingJobHandler,
   options: JobRunnerOptions = {}
 ) {
   const workerId = options.workerId ?? `worker-${randomUUID()}`;
@@ -44,7 +50,7 @@ export function createJobRunner(
 
   return {
     async runNext(): Promise<RunNextJobResult> {
-      const job = await repository.claimNextIngestionJob(workerId, now());
+      const job = await repository.claimNextJob(workerId, now());
 
       if (!job) {
         return { status: "idle" };
@@ -52,12 +58,11 @@ export function createJobRunner(
 
       try {
         const paperId = getPaperIdFromJob(job);
-        const result = await ingestionPipeline.run({ paperId });
-        await repository.markJobSucceeded(
-          job.id,
-          `Parsed ${result.pageCount} pages into ${result.chunkCount} chunks.`,
-          now()
-        );
+        const message =
+          job.type === "PARSE_PAPER"
+            ? await runParseJob(ingestionPipeline, paperId)
+            : await runEmbeddingJob(embeddingService, paperId);
+        await repository.markJobSucceeded(job.id, message, now());
 
         return { status: "succeeded", jobId: job.id };
       } catch (error) {
@@ -73,11 +78,11 @@ export function createJobRunner(
 
 export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunnerRepository {
   return {
-    async claimNextIngestionJob(workerId, now) {
+    async claimNextJob(workerId, now) {
       return prisma.$transaction(async (transaction) => {
         const job = await transaction.job.findFirst({
           where: {
-            type: "PARSE_PAPER",
+            type: { in: ["PARSE_PAPER", "EMBED_PAPER"] },
             status: "QUEUED",
             runAfter: { lte: now }
           },
@@ -112,9 +117,13 @@ export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunner
           where: { id: job.id }
         });
 
+        if (claimedJob.type !== "PARSE_PAPER" && claimedJob.type !== "EMBED_PAPER") {
+          throw new Error(`Unsupported worker job type: ${claimedJob.type}.`);
+        }
+
         return {
           id: claimedJob.id,
-          type: "PARSE_PAPER",
+          type: claimedJob.type,
           status: "RUNNING",
           paperId: claimedJob.paperId,
           payload: claimedJob.payload,
@@ -154,6 +163,18 @@ export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunner
       });
     }
   };
+}
+
+async function runParseJob(ingestionPipeline: IngestionPipelineHandler, paperId: string): Promise<string> {
+  const result = await ingestionPipeline.run({ paperId });
+
+  return `Parsed ${result.pageCount} pages into ${result.chunkCount} chunks.`;
+}
+
+async function runEmbeddingJob(embeddingService: EmbeddingJobHandler, paperId: string): Promise<string> {
+  const result = await embeddingService.embedPaper({ paperId });
+
+  return `Embedded ${result.embeddedChunkCount} chunks with ${result.model}.`;
 }
 
 function getPaperIdFromJob(job: IngestionJob): string {

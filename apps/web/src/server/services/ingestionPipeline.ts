@@ -39,6 +39,7 @@ export type IngestionRepository = {
   findPaperForIngestion(paperId: string): Promise<PaperForIngestion | null>;
   markPaperParsing(paperId: string, message: string): Promise<void>;
   persistParsedPaper(input: PersistParsedPaperInput): Promise<void>;
+  enqueueEmbeddingJob(paperId: string): Promise<void>;
   markPaperReady(paperId: string, message: string): Promise<void>;
   markPaperFailed(paperId: string, message: string): Promise<void>;
 };
@@ -109,8 +110,7 @@ export function createIngestionPipeline(
           references: parsed.references,
           chunks
         });
-        // TODO(Thread F): enqueue embedding work once embedding jobs and transitions are owned there.
-        await repository.markPaperReady(input.paperId, `Parsed ${parsed.pageCount} pages into ${chunks.length} chunks.`);
+        await repository.enqueueEmbeddingJob(input.paperId);
 
         return {
           paperId: input.paperId,
@@ -235,6 +235,22 @@ export function createPrismaIngestionRepository(prisma: PrismaClient): Ingestion
             embeddingModel: chunk.embeddingModel
           }))
         });
+      });
+    },
+    async enqueueEmbeddingJob(paperId) {
+      await prisma.job.create({
+        data: {
+          type: "EMBED_PAPER",
+          paperId,
+          payload: { paperId }
+        }
+      });
+      await prisma.paper.update({
+        where: { id: paperId },
+        data: {
+          status: "EMBEDDING",
+          statusMessage: "Queued paper chunks for embedding."
+        }
       });
     },
     async markPaperReady(paperId, message) {

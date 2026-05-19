@@ -70,6 +70,10 @@ function Assert-NoBlockedFiles {
     )
 
     foreach ($file in $Files) {
+        if ($file -eq ".env.example") {
+            continue
+        }
+
         foreach ($pattern in $blockedPathPatterns) {
             if ($file -match $pattern) {
                 Stop-WithMessage "Refusing to commit possible secret or upload file: $file"

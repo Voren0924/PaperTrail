@@ -8,7 +8,7 @@ import {
 } from "./ingestionPipeline";
 
 describe("ingestion pipeline", () => {
-  it("persists parsed pages, sections, references, and chunks before marking the paper ready", async () => {
+  it("persists parsed pages, sections, references, and chunks before enqueueing embeddings", async () => {
     const repository = createMemoryRepository();
     const pipeline = createIngestionPipeline(repository, {
       readOriginalPdf: () => Promise.resolve(createMinimalPdf(repeatSentence("Reliable parser text.", 80)))
@@ -24,8 +24,9 @@ describe("ingestion pipeline", () => {
     expect(repository.persisted[0]?.pages).toHaveLength(1);
     expect(repository.persisted[0]?.chunks).toHaveLength(1);
     expect(repository.statuses.at(-1)).toMatchObject({
-      status: "READY"
+      status: "EMBEDDING"
     });
+    expect(repository.embeddingJobs).toEqual(["paper-1"]);
   });
 
   it("marks low-text PDFs failed instead of producing low-quality chunks", async () => {
@@ -59,13 +60,16 @@ describe("ingestion pipeline", () => {
 function createMemoryRepository(): IngestionRepository & {
   persisted: PersistParsedPaperInput[];
   statuses: Array<{ status: string; message: string }>;
+  embeddingJobs: string[];
 } {
   const persisted: PersistParsedPaperInput[] = [];
   const statuses: Array<{ status: string; message: string }> = [];
+  const embeddingJobs: string[] = [];
 
   return {
     persisted,
     statuses,
+    embeddingJobs,
     findPaperForIngestion() {
       return Promise.resolve({ id: "paper-1", storageKey: "paper.pdf" });
     },
@@ -75,6 +79,11 @@ function createMemoryRepository(): IngestionRepository & {
     },
     persistParsedPaper(input) {
       persisted.push(input);
+      return Promise.resolve();
+    },
+    enqueueEmbeddingJob(paperId) {
+      embeddingJobs.push(paperId);
+      statuses.push({ status: "EMBEDDING", message: "Queued paper chunks for embedding." });
       return Promise.resolve();
     },
     markPaperReady(_paperId, message) {
