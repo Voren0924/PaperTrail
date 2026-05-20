@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+
+import { AppNav } from "@/components/AppNav";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,11 +28,7 @@ export default function RootLayout({
                 </span>
                 <span>PaperTrail</span>
               </Link>
-              <nav className="nav" aria-label="Primary navigation">
-                <span>Library</span>
-                <span>Papers</span>
-                <span>Notes</span>
-              </nav>
+              <AppNav />
             </div>
           </header>
           <main className="main">{children}</main>
