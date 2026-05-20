@@ -43,6 +43,49 @@ describe("chat service", () => {
     expect(repository.persistedEvidence[0]?.citedClaims).toHaveLength(1);
   });
 
+  it("returns frontend-compatible citation metadata derived from retrieved chunks", async () => {
+    const repository = createMemoryRepository();
+    const retrievalService = createRetrievalService([
+      createRetrievedChunk({
+        paperId: "paper-1",
+        chunkId: "chunk-42",
+        pageStart: 4,
+        pageEnd: 6,
+        sectionTitle: "Evaluation",
+        text: "The evaluation chunk contains benchmark evidence and ablation details.",
+        similarityScore: 0.87
+      })
+    ]);
+    const { provider } = createProvider([
+      {
+        answer: "The paper evaluates the method with benchmarks.",
+        insufficientEvidence: false,
+        citedClaims: [{ claimText: "The paper evaluates the method with benchmarks.", chunkIds: ["chunk-42"] }]
+      }
+    ]);
+    const service = createChatService(repository, retrievalService, provider);
+
+    const result = await service.answerQuestion({
+      currentUserId: "user-1",
+      question: "How is the method evaluated?",
+      paperIds: ["paper-1"]
+    });
+
+    expect(result.citations).toEqual([
+      {
+        paperId: "paper-1",
+        chunkId: "chunk-42",
+        pageStart: 4,
+        pageEnd: 6,
+        sectionTitle: "Evaluation",
+        text: "The evaluation chunk contains benchmark evidence and ablation details.",
+        similarityScore: 0.87,
+        label: "[paper-1, pp. 4-6]",
+        quote: "The evaluation chunk contains benchmark evidence and ablation details."
+      }
+    ]);
+  });
+
   it("returns insufficient evidence without calling the provider when retrieval is empty", async () => {
     const repository = createMemoryRepository();
     const retrievalService = createRetrievalService([]);

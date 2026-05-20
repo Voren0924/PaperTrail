@@ -7,7 +7,7 @@ import type { RunIngestionPipelineInput, RunIngestionPipelineResult } from "../s
 
 export type IngestionJob = {
   id: string;
-  type: "PARSE_PAPER" | "EMBED_PAPER";
+  type: "PARSE_PAPER" | "EMBED_PAPER" | "RETRY_PAPER";
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
   paperId: string | null;
   payload: unknown;
@@ -59,7 +59,7 @@ export function createJobRunner(
       try {
         const paperId = getPaperIdFromJob(job);
         const message =
-          job.type === "PARSE_PAPER"
+          job.type === "PARSE_PAPER" || job.type === "RETRY_PAPER"
             ? await runParseJob(ingestionPipeline, paperId)
             : await runEmbeddingJob(embeddingService, paperId);
         await repository.markJobSucceeded(job.id, message, now());
@@ -82,7 +82,7 @@ export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunner
       return prisma.$transaction(async (transaction) => {
         const job = await transaction.job.findFirst({
           where: {
-            type: { in: ["PARSE_PAPER", "EMBED_PAPER"] },
+            type: { in: ["PARSE_PAPER", "EMBED_PAPER", "RETRY_PAPER"] },
             status: "QUEUED",
             runAfter: { lte: now }
           },
@@ -117,8 +117,13 @@ export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunner
           where: { id: job.id }
         });
 
-        if (claimedJob.type !== "PARSE_PAPER" && claimedJob.type !== "EMBED_PAPER") {
-          throw new Error(`Unsupported worker job type: ${claimedJob.type}.`);
+        if (
+          claimedJob.type !== "PARSE_PAPER" &&
+          claimedJob.type !== "EMBED_PAPER" &&
+          claimedJob.type !== "RETRY_PAPER"
+        ) {
+          const unsupportedJob = claimedJob as { type: string };
+          throw new Error(`Unsupported worker job type: ${unsupportedJob.type}.`);
         }
 
         return {

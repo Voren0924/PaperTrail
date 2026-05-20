@@ -7,17 +7,25 @@ answers into reusable research notes.
 
 ## Current Status
 
-Thread A, the monorepo foundation, Thread B, the database/Prisma foundation, and
-Thread C, the auth/API foundation, are complete.
+The MVP vertical slice is implemented through Threads A-H:
 
-Paper upload and local storage APIs are implemented in Thread D. PDF parsing,
-RAG, grounded answering, comparison, and notes remain planned work.
+- monorepo foundation;
+- database and Prisma schema;
+- auth and API error foundation;
+- paper upload and local storage;
+- worker-based PDF parsing and chunking;
+- embeddings and retrieval;
+- grounded answering and chat API;
+- frontend application UI for auth, upload, paper detail, status, chat, and citations.
+
+Notes, comparison, annotation export, billing, admin, and OCR remain outside the
+MVP scope.
 
 ## Repository Structure
 
 ```text
 apps/
-  web/              Next.js App Router frontend shell
+  web/              Next.js App Router UI, API routes, services, and worker
 packages/
   config/           Shared ESLint, Prettier, and TypeScript configuration
   shared/           Shared TypeScript utilities and types
@@ -28,9 +36,6 @@ scripts/
   codex-finish.ps1
 ```
 
-`packages/db` is planned or in progress for the database workstream. It may not
-exist on every branch until that work is merged.
-
 ## Prerequisites
 
 - Node.js LTS.
@@ -38,8 +43,9 @@ exist on every branch until that work is merged.
 - pnpm, managed through Corepack.
 - Docker Desktop or a local PostgreSQL installation for later database work.
 
-PostgreSQL and pgvector are required for database-backed API routes. Unit tests
-for validation and storage behavior do not require a live database.
+PostgreSQL with pgvector is required for database-backed API routes, migrations,
+worker processing, vector retrieval, and local end-to-end use. Unit tests use
+mocks/fakes where possible and do not call real LLM or embedding APIs.
 
 ## Developer Setup
 
@@ -49,10 +55,45 @@ Install workspace dependencies:
 corepack pnpm install
 ```
 
+Create a local `.env.local` or environment with placeholder values from
+`.env.example`, then set real server-side provider keys locally:
+
+```text
+DATABASE_URL=postgresql://papertrail:papertrail@localhost:5432/papertrail
+STORAGE_DRIVER=local
+LOCAL_STORAGE_DIR=.data/uploads
+MAX_UPLOAD_MB=50
+WORKER_POLL_INTERVAL_MS=5000
+CHAT_PROVIDER=openai-compatible
+CHAT_BASE_URL=https://api.openai.com/v1
+CHAT_API_KEY=<local secret>
+CHAT_MODEL=gpt-4o-mini
+EMBEDDING_PROVIDER=openai-compatible
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_API_KEY=<local secret>
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+```
+
+Do not commit `.env.local`, real API keys, uploaded PDFs, or `.data`.
+
+Generate the Prisma client and apply migrations:
+
+```powershell
+corepack pnpm db:generate
+corepack pnpm db:migrate
+```
+
 Start the web app in development mode:
 
 ```powershell
 corepack pnpm dev
+```
+
+Run the worker in a second terminal:
+
+```powershell
+corepack pnpm worker
 ```
 
 Run linting:
@@ -82,6 +123,7 @@ PostgreSQL.
 Configure local uploads with:
 
 ```text
+STORAGE_DRIVER=local
 LOCAL_STORAGE_DIR=.data/uploads
 MAX_UPLOAD_MB=50
 ```

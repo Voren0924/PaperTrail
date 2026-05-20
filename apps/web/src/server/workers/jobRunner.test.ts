@@ -66,6 +66,36 @@ describe("job runner", () => {
     expect(repository.events).toContain("succeeded:job-1:Embedded 4 chunks with text-embedding-3-small.");
   });
 
+  it("claims a queued retry job and reruns parsing", async () => {
+    const repository = createMemoryJobRepository([
+      createJob({ id: "job-1", paperId: "paper-1", type: "RETRY_PAPER" })
+    ]);
+    const pipeline: IngestionPipelineHandler = {
+      run: (input) => Promise.resolve({
+        paperId: input.paperId,
+        pageCount: 5,
+        chunkCount: 8,
+        referenceCount: 2
+      })
+    };
+    const runner = createJobRunner(
+      repository,
+      pipeline,
+      { embedPaper: () => Promise.reject(new Error("should not embed")) },
+      {
+        workerId: "worker-test",
+        now: () => new Date("2026-05-20T00:00:00.000Z")
+      }
+    );
+
+    await expect(runner.runNext()).resolves.toEqual({
+      status: "succeeded",
+      jobId: "job-1"
+    });
+    expect(repository.events).toContain("claimed:job-1:worker-test");
+    expect(repository.events).toContain("succeeded:job-1:Parsed 5 pages into 8 chunks.");
+  });
+
   it("records failure diagnostics when the ingestion pipeline fails", async () => {
     const repository = createMemoryJobRepository([
       createJob({ id: "job-1", paperId: "paper-1", attempts: 3, maxAttempts: 3 })
@@ -133,7 +163,7 @@ function createMemoryJobRepository(jobs: IngestionJob[]): JobRunnerRepository & 
 function createJob(input: {
   id: string;
   paperId: string;
-  type?: "PARSE_PAPER" | "EMBED_PAPER";
+  type?: "PARSE_PAPER" | "EMBED_PAPER" | "RETRY_PAPER";
   attempts?: number;
   maxAttempts?: number;
 }): IngestionJob {
