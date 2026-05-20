@@ -21,15 +21,22 @@ Required environment:
 
 ```text
 DATABASE_URL=postgresql://...
+STORAGE_DRIVER=local
 LOCAL_STORAGE_DIR=.data/uploads
 WORKER_POLL_INTERVAL_MS=5000
+EMBEDDING_PROVIDER=openai-compatible
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_API_KEY=...
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
 ```
 
 `WORKER_POLL_INTERVAL_MS` is optional. `LOCAL_STORAGE_DIR` defaults to `.data/uploads`.
+Provider keys must be supplied only through local or deployment environment files.
 
 ## Job Behavior
 
-- The worker looks for queued `PARSE_PAPER` jobs whose `runAfter` is due.
+- The worker looks for queued `PARSE_PAPER`, `RETRY_PAPER`, and `EMBED_PAPER` jobs whose `runAfter` is due.
 - It claims one job at a time by moving it to `RUNNING`, incrementing `attempts`, and setting lock fields.
 - On success, the job is marked `SUCCEEDED`.
 - On failure, the job records an error message. Jobs with remaining attempts are re-queued with a short delay; exhausted jobs are marked `FAILED`.
@@ -43,18 +50,7 @@ WORKER_POLL_INTERVAL_MS=5000
 - Low-text or likely scanned PDFs are marked failed instead of silently producing weak chunks.
 - Chunking is deterministic and section-aware when headings are available, otherwise page-aware.
 - Chunks preserve page ranges, character offsets where feasible, page-local offsets, section labels, content hashes, and `chunkVersion`.
-- Chunks do not include embeddings in this thread. The required `embeddingModel` column is written as `pending` until Thread F owns embedding generation.
-
-## Thread D Integration TODO
-
-Thread D upload/storage code is not present on `origin/main` for this implementation. The ingestion pipeline therefore depends on a narrow storage interface:
-
-```ts
-readOriginalPdf(storageKey): Promise<Buffer>
-```
-
-The current worker includes a local filesystem adapter using `LOCAL_STORAGE_DIR`. Once Thread D lands, wire this interface to `storageService` instead of changing parser or chunker code.
-
-## Thread F Integration TODO
-
-After successful parsing and chunking, the pipeline marks the paper `READY` and leaves a TODO where Thread F should enqueue embedding work or update the status transition to `EMBEDDING`, depending on the retrieval implementation.
+- Chunks are first stored with `embeddingModel` set to `pending`.
+- After parsing, the ingestion pipeline enqueues `EMBED_PAPER` and marks the paper `EMBEDDING`.
+- The embedding job writes pgvector embeddings, updates chunk `embeddingModel`, and marks the paper `READY`.
+- `RETRY_PAPER` reruns parsing and chunking for the existing paper, then enqueues a fresh embedding job.

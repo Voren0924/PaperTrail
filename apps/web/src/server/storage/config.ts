@@ -2,6 +2,7 @@ import path from "node:path";
 
 const defaultMaxUploadMb = 50;
 const defaultLocalStorageDir = ".data/uploads";
+const defaultStorageDriver = "local";
 
 export type StorageConfig = {
   driver: "local";
@@ -10,12 +11,25 @@ export type StorageConfig = {
   maxUploadMb: number;
 };
 
-export function getStorageConfig(env: NodeJS.ProcessEnv = process.env): StorageConfig {
+export class StorageConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StorageConfigurationError";
+  }
+}
+
+export function getStorageConfig(env: Record<string, string | undefined> = process.env): StorageConfig {
+  const driver = env.STORAGE_DRIVER?.trim() || defaultStorageDriver;
+
+  if (driver !== defaultStorageDriver) {
+    throw new StorageConfigurationError(`Unsupported STORAGE_DRIVER: ${driver}.`);
+  }
+
   const maxUploadMb = parsePositiveInteger(env.MAX_UPLOAD_MB, defaultMaxUploadMb);
   const localStorageDir = env.LOCAL_STORAGE_DIR?.trim() || defaultLocalStorageDir;
 
   return {
-    driver: "local",
+    driver: defaultStorageDriver,
     localStorageDir: path.resolve(process.cwd(), localStorageDir),
     maxUploadBytes: maxUploadMb * 1024 * 1024,
     maxUploadMb
