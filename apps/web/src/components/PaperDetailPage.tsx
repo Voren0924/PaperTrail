@@ -83,11 +83,11 @@ export function PaperDetailPage({ paperId }: { paperId: string }) {
     <div className="paper-detail">
       <section className="paper-meta" aria-labelledby="paper-title">
         <Link className="back-link" href="/papers">
-          Back to papers
+          Back to documents
         </Link>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Paper detail</p>
+            <p className="eyebrow">Document detail</p>
             <h1 id="paper-title">{paper.title ?? paper.originalFileName}</h1>
           </div>
           <StatusBadge status={paper.status} />

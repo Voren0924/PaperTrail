@@ -274,7 +274,9 @@ export function createPrismaIngestionRepository(prisma: PrismaClient): Ingestion
   };
 }
 
-export function createLocalPdfStorageReader(baseDir = process.env.LOCAL_STORAGE_DIR ?? ".data/uploads"): PdfStorageReader {
+export function createLocalPdfStorageReader(
+  baseDir = process.env.PAPERTRAIL_APP_DATA_DIR ?? process.env.LOCAL_STORAGE_DIR ?? ".data/PaperTrail"
+): PdfStorageReader {
   const root = resolve(baseDir);
 
   return {

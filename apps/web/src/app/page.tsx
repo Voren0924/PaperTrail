@@ -6,33 +6,36 @@ export default function HomePage() {
       <section className="hero" aria-labelledby="home-title">
         <p className="eyebrow">PaperTrail</p>
         <h1 className="title" id="home-title">
-          Upload papers. Ask grounded questions. Inspect the evidence.
+          Import PDFs. Ask grounded questions. Inspect the evidence.
         </h1>
         <p className="lede">
-          PaperTrail turns uploaded CS PDFs into page-aware, citation-backed answers that stay tied to the source chunks
-          returned by the backend.
+          PaperTrail runs locally, stores your PDF library and indexes on this computer, and uses your configured
+          OpenAI-compatible provider for citation-backed answers.
         </p>
         <div className="actions">
           <Link className="button button--primary" href="/papers">
-            Open library
+            Open documents
           </Link>
           <Link className="button button--secondary" href="/papers/new">
-            Upload PDF
+            Import PDF
+          </Link>
+          <Link className="button button--secondary" href="/settings">
+            Settings
           </Link>
         </div>
       </section>
       <section className="workflow-panel" aria-label="Workflow">
         <div>
           <strong>1</strong>
-          <span>Upload a born-digital PDF.</span>
+          <span>Configure your local model provider.</span>
         </div>
         <div>
           <strong>2</strong>
-          <span>Track processing and parser status.</span>
+          <span>Import a born-digital PDF.</span>
         </div>
         <div>
           <strong>3</strong>
-          <span>Ask questions only when citations are ready.</span>
+          <span>Ask questions once local citations are ready.</span>
         </div>
       </section>
     </div>

@@ -1,4 +1,9 @@
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
 import { PrismaClient } from "@prisma/client";
+
+ensureDefaultDatabaseUrl();
 
 const globalForPrisma = globalThis as unknown as {
   papertrailPrisma?: PrismaClient;
@@ -22,3 +27,15 @@ export function getPrismaClient(): PrismaClient {
 }
 
 export type { PrismaClient };
+
+function ensureDefaultDatabaseUrl(): void {
+  if (process.env.DATABASE_URL) {
+    return;
+  }
+
+  const appDataDir = process.env.PAPERTRAIL_APP_DATA_DIR || resolve(process.cwd(), ".data", "PaperTrail");
+  const databasePath = resolve(appDataDir, "papertrail.db");
+
+  mkdirSync(dirname(databasePath), { recursive: true });
+  process.env.DATABASE_URL = `file:${databasePath.replace(/\\/g, "/")}`;
+}

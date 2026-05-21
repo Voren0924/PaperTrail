@@ -1,29 +1,38 @@
 # @papertrail/db
 
-Prisma database package for PaperTrail.
+Prisma database package for the local-first PaperTrail MVP.
 
-## Local setup
+## Local Setup
 
-1. Start PostgreSQL with the `pgvector` extension available.
-2. Set `DATABASE_URL` in your local environment.
-3. Run migrations:
+The MVP uses SQLite. The runtime sets a default local database URL when `DATABASE_URL` is not present:
+
+```text
+.data/PaperTrail/papertrail.db
+```
+
+For Prisma CLI commands, set:
 
 ```sh
+DATABASE_URL=file:../../../.data/PaperTrail/papertrail.db
+```
+
+Then run:
+
+```sh
+corepack pnpm db:generate
 corepack pnpm db:migrate
 ```
 
-The initial migration runs `CREATE EXTENSION IF NOT EXISTS vector;`. On managed PostgreSQL, the database role may need permission to install extensions. If extension creation is restricted, ask an administrator to run:
+## Embeddings
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
+SQLite does not provide pgvector. The local MVP stores embedding vectors in the `Embedding.vectorJson` column with provider, model, and dimension metadata. Retrieval loads candidate vectors and ranks them with TypeScript cosine similarity.
 
-## pgvector and Prisma
+This keeps the desktop MVP self-contained and avoids a PostgreSQL service dependency. It is intended for MVP-scale local libraries; a future high-scale mode can introduce a native local vector index.
 
-Prisma does not expose first-class vector operators or indexes. The `PaperChunk.embedding` field is modeled as `Unsupported("vector(1536)")`, and the initial migration creates the vector column plus an `ivfflat` index with raw SQL.
+## Settings
 
-Application retrieval code should use raw SQL for vector similarity queries until Prisma adds complete pgvector support.
+Provider settings are stored in the `Setting` table. The API key is stored locally in SQLite for this migration pass and must not be logged or committed. OS keychain integration is a Tauri packaging follow-up.
 
 ## Tests
 
-The current database tests validate the Prisma schema and migration text without connecting to PostgreSQL. Future integration tests should run against a local PostgreSQL instance with pgvector enabled.
+The database tests validate the Prisma schema and migration text without connecting to a live database.

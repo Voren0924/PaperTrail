@@ -1,8 +1,11 @@
 import type { PrismaClient } from "@papertrail/db";
 
 import type { EmbeddingProvider } from "../embeddings/embeddingProvider";
-import { getEmbeddingProviderConfig } from "../embeddings/embeddingProvider";
 import { createOpenAiCompatibleEmbeddingProvider } from "../embeddings/openAiCompatibleEmbeddingProvider";
+import {
+  createEmbeddingProviderConfigFromSettings,
+  createSettingsService
+} from "../settings/settingsService";
 import {
   DEFAULT_RETRIEVAL_TOP_K,
   normalizeTopK,
@@ -18,6 +21,8 @@ export type RetrievalRepository = {
   searchSimilarChunks(input: {
     userId: string;
     paperIds: string[];
+    provider: string;
+    model: string;
     embedding: number[];
     topK: number;
     minSimilarity?: number;
@@ -82,6 +87,8 @@ export function createRetrievalService(repository: RetrievalRepository, embeddin
       const chunks = await repository.searchSimilarChunks({
         userId: input.userId,
         paperIds: accessiblePaperIds,
+        provider: embeddingProvider.name,
+        model: embeddingResult.model,
         embedding: queryEmbedding,
         topK,
         minSimilarity: input.minSimilarity
@@ -99,10 +106,22 @@ export function createRetrievalService(repository: RetrievalRepository, embeddin
 }
 
 export function createConfiguredRetrievalService(prisma: PrismaClient) {
-  const config = getEmbeddingProviderConfig();
-  const provider = createOpenAiCompatibleEmbeddingProvider(config);
+  const repository = createPrismaRetrievalRepository(prisma);
+  const settingsService = createSettingsService();
 
-  return createRetrievalService(createPrismaRetrievalRepository(prisma), provider);
+  return {
+    async retrieve(input: RetrieveRelevantChunksInput): Promise<RetrievalResult> {
+      const settings = await settingsService.requireProviderSettings();
+      const provider = createOpenAiCompatibleEmbeddingProvider(
+        createEmbeddingProviderConfigFromSettings(settings)
+      );
+
+      return createRetrievalService(repository, provider).retrieve({
+        ...input,
+        topK: input.topK ?? settings.maxRetrievedChunks
+      });
+    }
+  };
 }
 
 export function createPrismaRetrievalRepository(prisma: PrismaClient): RetrievalRepository {
@@ -121,7 +140,44 @@ export function createPrismaRetrievalRepository(prisma: PrismaClient): Retrieval
       return input.paperIds.filter((paperId) => accessible.has(paperId));
     },
     searchSimilarChunks(input) {
-      return searchSimilarChunks(prisma, input);
+      return prisma.embedding
+        .findMany({
+          where: {
+            provider: input.provider,
+            model: input.model,
+            chunk: {
+              is: {
+                paperId: { in: input.paperIds },
+                paper: {
+                  is: {
+                    userId: input.userId
+                  }
+                }
+              }
+            }
+          },
+          include: {
+            chunk: {
+              include: {
+                section: true
+              }
+            }
+          }
+        })
+        .then((embeddings) =>
+          searchSimilarChunks(
+            embeddings.map((embedding) => ({
+              paperId: embedding.chunk.paperId,
+              chunkId: embedding.chunkId,
+              pageStart: embedding.chunk.startPage,
+              pageEnd: embedding.chunk.endPage,
+              sectionTitle: embedding.chunk.section?.title ?? null,
+              text: embedding.chunk.text,
+              vectorJson: embedding.vectorJson
+            })),
+            input
+          )
+        );
     }
   };
 }

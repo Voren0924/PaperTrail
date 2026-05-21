@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { AppNav } from "@/components/AppNav";
+import { SetupGate } from "@/components/SetupGate";
 
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PaperTrail",
   description:
-    "Citation-grounded research assistance for computer science papers."
+    "Local-first desktop PDF question answering with citation-grounded evidence."
 };
 
 export default function RootLayout({
@@ -31,7 +32,9 @@ export default function RootLayout({
               <AppNav />
             </div>
           </header>
-          <main className="main">{children}</main>
+          <main className="main">
+            <SetupGate>{children}</SetupGate>
+          </main>
         </div>
       </body>
     </html>

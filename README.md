@@ -1,31 +1,24 @@
 # PaperTrail
 
-PaperTrail is a full-stack AI research assistant for computer science papers.
-The planned MVP lets students upload academic PDFs, extract paper text and
-metadata, ask citation-grounded questions, compare evidence, and turn cited
-answers into reusable research notes.
+PaperTrail is now a local-first desktop MVP direction for PDF question answering. The current implementation still runs through the Next.js development shell as a temporary local bridge, but the product flow no longer requires registration, login, logout, teams, organizations, billing, or cloud accounts.
+
+The app lets a single local user import PDFs, parse and chunk them locally, create embeddings through a user-configured OpenAI-compatible provider, and ask citation-grounded questions over the local document library.
 
 ## Current Status
 
-The MVP vertical slice is implemented through Threads A-H:
-
-- monorepo foundation;
-- database and Prisma schema;
-- auth and API error foundation;
-- paper upload and local storage;
-- worker-based PDF parsing and chunking;
-- embeddings and retrieval;
-- grounded answering and chat API;
-- frontend application UI for auth, upload, paper detail, status, chat, and citations.
-
-Notes, comparison, annotation export, billing, admin, and OCR remain outside the
-MVP scope.
+- Local-first MVP foundation is in place with SQLite through Prisma.
+- Provider settings are saved locally from the Settings screen.
+- API keys are user-provided; no production key is bundled.
+- Imported PDFs are copied into local app data storage.
+- Existing parsing, chunking, embedding, retrieval, grounded answering, and citation UI logic are preserved.
+- Next.js API routes remain as thin local wrappers until Tauri commands are added.
+- Full Windows executable packaging with Tauri is a follow-up task.
 
 ## Repository Structure
 
 ```text
 apps/
-  web/              Next.js App Router UI, API routes, services, and worker
+  web/              Next.js local bridge UI, API routes, services, and worker
 packages/
   config/           Shared ESLint, Prettier, and TypeScript configuration
   shared/           Shared TypeScript utilities and types
@@ -36,16 +29,21 @@ scripts/
   codex-finish.ps1
 ```
 
-## Prerequisites
+## Local Data
 
-- Node.js LTS.
-- Corepack enabled for package manager shims.
-- pnpm, managed through Corepack.
-- Docker Desktop or a local PostgreSQL installation for later database work.
+By default, local development data is stored under:
 
-PostgreSQL with pgvector is required for database-backed API routes, migrations,
-worker processing, vector retrieval, and local end-to-end use. Unit tests use
-mocks/fakes where possible and do not call real LLM or embedding APIs.
+```text
+.data/PaperTrail/
+  papertrail.db
+  files/
+  cache/
+  logs/
+```
+
+The app data directory can be overridden with `PAPERTRAIL_APP_DATA_DIR`. Prisma CLI commands can use `DATABASE_URL`; the runtime also creates a default SQLite URL when `DATABASE_URL` is not set.
+
+API keys are currently stored in the local SQLite settings table for this migration pass. Moving the API key into the OS credential store is planned for the Tauri packaging pass. Do not commit real API keys, `.env` files, uploaded PDFs, or `.data`.
 
 ## Developer Setup
 
@@ -55,36 +53,24 @@ Install workspace dependencies:
 corepack pnpm install
 ```
 
-Create a local `.env.local` or environment with placeholder values from
-`.env.example`, then set real server-side provider keys locally:
+Create a local `.env.local` or environment from `.env.example` if you want explicit paths:
 
 ```text
-DATABASE_URL=postgresql://papertrail:papertrail@localhost:5432/papertrail
+DATABASE_URL=file:../../../.data/PaperTrail/papertrail.db
+PAPERTRAIL_APP_DATA_DIR=.data/PaperTrail
 STORAGE_DRIVER=local
-LOCAL_STORAGE_DIR=.data/uploads
 MAX_UPLOAD_MB=50
 WORKER_POLL_INTERVAL_MS=5000
-CHAT_PROVIDER=openai-compatible
-CHAT_BASE_URL=https://api.openai.com/v1
-CHAT_API_KEY=<local secret>
-CHAT_MODEL=gpt-4o-mini
-EMBEDDING_PROVIDER=openai-compatible
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-EMBEDDING_API_KEY=<local secret>
-EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_DIMENSIONS=1536
 ```
 
-Do not commit `.env.local`, real API keys, uploaded PDFs, or `.data`.
-
-Generate the Prisma client and apply migrations:
+Apply the local SQLite migration and generate Prisma:
 
 ```powershell
 corepack pnpm db:generate
 corepack pnpm db:migrate
 ```
 
-Start the web app in development mode:
+Start the local UI:
 
 ```powershell
 corepack pnpm dev
@@ -95,6 +81,26 @@ Run the worker in a second terminal:
 ```powershell
 corepack pnpm worker
 ```
+
+Open Settings in the app and enter:
+
+- API Base URL
+- API Key
+- Chat Model
+- Embedding Model
+
+The provider must implement OpenAI-compatible `/chat/completions` and `/embeddings` endpoints.
+
+## Using The MVP
+
+1. Open the app.
+2. Configure provider settings if prompted.
+3. Import a local PDF.
+4. Wait for parsing, chunking, and embedding to finish.
+5. Open the document and ask a question.
+6. Inspect citations with page ranges and source snippets.
+
+## Validation
 
 Run linting:
 
@@ -114,31 +120,25 @@ Run tests:
 corepack pnpm test
 ```
 
-## Local Upload Storage
+Validate Prisma:
 
-Uploaded PDFs are stored through a storage service abstraction. The MVP adapter
-writes files to local disk and stores only metadata plus a storage key in
-PostgreSQL.
-
-Configure local uploads with:
-
-```text
-STORAGE_DRIVER=local
-LOCAL_STORAGE_DIR=.data/uploads
-MAX_UPLOAD_MB=50
+```powershell
+$env:DATABASE_URL="file:../../../.data/PaperTrail/papertrail.db"
+corepack pnpm --filter @papertrail/db exec prisma validate --schema prisma/schema.prisma
 ```
 
-`LOCAL_STORAGE_DIR` is resolved relative to the web app process working
-directory when a relative path is provided. Keep it outside publicly served
-directories such as `apps/web/public`. The default `.data/uploads` path is
-already ignored by Git, and uploaded PDFs must not be committed.
+## Current Limitations
+
+- The app is not packaged as a Windows executable yet.
+- The UI still uses browser file input through the Next.js local bridge; the import service now copies files into app-controlled local storage and is ready for a Tauri file-picker command.
+- Embedding search is TypeScript cosine similarity over locally stored vectors, intended for MVP-scale libraries.
+- API key storage is local plaintext until OS keychain integration is added.
+- Internal model names such as `Paper` remain for compatibility with the existing RAG code.
 
 ## Codex Workflow
 
 - Use one branch per task, named `codex/<task-name>`.
-- Use one Git worktree per task so parallel Codex threads do not interfere with
-  each other.
-- Keep each task scoped to its assigned files and workstream.
+- Keep changes scoped to the assigned task.
 - At task completion, run:
 
 ```powershell
@@ -148,8 +148,3 @@ scripts/codex-finish.ps1 -Message "clear commit message"
 - Push the current `codex/<task-name>` branch.
 - Open a pull request targeting `main`.
 - Do not merge pull requests automatically.
-
-The finish script is intentionally limited to `codex/` branches. It checks the
-current status, refuses common secret and upload paths, commits staged task
-changes, and pushes the current branch to `origin`.
-

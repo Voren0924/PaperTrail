@@ -6,12 +6,14 @@ export const baseConfig = tseslint.config(
   {
     ignores: [
       "**/.next/**",
+      "**/.worktrees/**",
       "**/coverage/**",
       "**/dist/**",
       "**/node_modules/**",
       "**/*.cjs",
       "**/*.config.mjs",
-      "**/*.config.ts"
+      "**/*.config.ts",
+      "**/next-env.d.ts"
     ]
   },
   {

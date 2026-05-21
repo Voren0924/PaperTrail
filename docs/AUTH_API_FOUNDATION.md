@@ -1,5 +1,7 @@
 # Auth And API Foundation Notes
 
+Desktop MVP update: browser auth is no longer part of the active MVP flow. The login, register, logout, and `/api/me` routes have been removed from the local bridge UI/API. Existing auth service code is retained only as legacy implementation history and should not be used by MVP document import, retrieval, or chat flows.
+
 Thread C adds the first browser auth API shape:
 
 - `POST /api/auth/register`

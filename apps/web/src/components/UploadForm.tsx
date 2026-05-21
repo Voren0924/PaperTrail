@@ -63,7 +63,7 @@ export function UploadForm() {
         </div>
       ) : null}
       <Button type="submit" disabled={isUploading}>
-        {isUploading ? "Uploading..." : "Upload paper"}
+        {isUploading ? "Importing..." : "Import PDF"}
       </Button>
     </form>
   );

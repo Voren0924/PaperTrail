@@ -7,13 +7,15 @@ import type { RunIngestionPipelineInput, RunIngestionPipelineResult } from "../s
 
 export type IngestionJob = {
   id: string;
-  type: "PARSE_PAPER" | "EMBED_PAPER" | "RETRY_PAPER";
+  type: IngestionJobType;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
   paperId: string | null;
   payload: unknown;
   attempts: number;
   maxAttempts: number;
 };
+
+type IngestionJobType = "PARSE_PAPER" | "EMBED_PAPER" | "RETRY_PAPER";
 
 export type JobRunnerRepository = {
   claimNextJob(workerId: string, now: Date): Promise<IngestionJob | null>;

@@ -1,7 +1,7 @@
 import path from "node:path";
 
 const defaultMaxUploadMb = 50;
-const defaultLocalStorageDir = ".data/uploads";
+const defaultAppDataDir = path.join(".data", "PaperTrail");
 const defaultStorageDriver = "local";
 
 export type StorageConfig = {
@@ -26,7 +26,7 @@ export function getStorageConfig(env: Record<string, string | undefined> = proce
   }
 
   const maxUploadMb = parsePositiveInteger(env.MAX_UPLOAD_MB, defaultMaxUploadMb);
-  const localStorageDir = env.LOCAL_STORAGE_DIR?.trim() || defaultLocalStorageDir;
+  const localStorageDir = env.PAPERTRAIL_APP_DATA_DIR?.trim() || env.LOCAL_STORAGE_DIR?.trim() || defaultAppDataDir;
 
   return {
     driver: defaultStorageDriver,

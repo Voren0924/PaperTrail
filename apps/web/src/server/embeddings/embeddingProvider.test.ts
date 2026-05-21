@@ -28,7 +28,7 @@ describe("embedding provider config", () => {
     });
   });
 
-  it("rejects dimensions that do not match the pgvector column", () => {
+  it("rejects dimensions that do not match the local vector storage contract", () => {
     expect(() => parseEmbeddingDimensions("3072")).toThrow(EmbeddingConfigurationError);
   });
 

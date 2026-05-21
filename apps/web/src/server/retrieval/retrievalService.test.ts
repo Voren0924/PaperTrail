@@ -50,6 +50,8 @@ describe("retrieval service", () => {
       {
         userId: "user-1",
         paperIds: ["paper-1"],
+        provider: "openai-compatible",
+        model: "embedding-model",
         embedding: createEmbedding(0.3),
         topK: 4,
         minSimilarity: undefined

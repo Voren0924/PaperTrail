@@ -12,6 +12,7 @@ const paper: Paper = {
   abstract: null,
   originalFileName: "grounded-qa.pdf",
   fileSha256: "abc123",
+  mimeType: "application/pdf",
   pageCount: 12,
   status: "READY",
   statusMessage: null,
@@ -23,8 +24,8 @@ describe("PaperListContent", () => {
   it("renders the empty state", () => {
     const html = renderToStaticMarkup(<PaperListContent papers={[]} />);
 
-    expect(html).toContain("No papers yet");
-    expect(html).toContain("Upload PDF");
+    expect(html).toContain("No documents yet");
+    expect(html).toContain("Import PDF");
   });
 
   it("renders paper list rows with status and page count", () => {

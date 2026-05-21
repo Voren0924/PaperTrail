@@ -1,40 +1,43 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { EMBEDDING_DIMENSIONS } from "../embeddings/embeddingProvider";
-import { buildVectorSearchSql, normalizeTopK, searchSimilarChunks } from "./vectorSearch";
+import { cosineSimilarity, normalizeTopK, searchSimilarChunks } from "./vectorSearch";
 
 describe("vector search", () => {
-  it("constructs scoped pgvector SQL with user and paper filters", () => {
-    const sql = buildVectorSearchSql(["paper-1", "paper-2"], 0.75);
-
-    expect(sql).toContain('p."userId" = $2::uuid');
-    expect(sql).toContain('c."paperId" IN ($3::uuid, $4::uuid)');
-    expect(sql).toContain('(1 - (c."embedding" <=> $1::vector)) >= $5');
-    expect(sql).toContain("LIMIT $6");
-    expect(sql).toContain('ORDER BY c."embedding" <=> $1::vector ASC, c."chunkIndex" ASC');
+  it("sorts local SQLite embedding candidates by cosine similarity", () => {
+    expect(
+      searchSimilarChunks(
+        [
+          createCandidate({ chunkId: "chunk-low", vector: [0.2, 0.8] }),
+          createCandidate({ chunkId: "chunk-high", vector: [1, 0] }),
+          createCandidate({ chunkId: "chunk-other-paper", paperId: "paper-2", vector: [1, 0] })
+        ],
+        {
+          paperIds: ["paper-1"],
+          embedding: [1, 0],
+          topK: 1
+        }
+      )
+    ).toEqual([
+      {
+        paperId: "paper-1",
+        chunkId: "chunk-high",
+        pageStart: 1,
+        pageEnd: 1,
+        sectionTitle: null,
+        text: "Candidate text",
+        similarityScore: 1
+      }
+    ]);
   });
 
-  it("passes vector search parameters in deterministic order", async () => {
-    const queryRawUnsafe = vi.fn((_query: string, ..._values: unknown[]) => Promise.resolve([]));
-    const prisma = {
-      $queryRawUnsafe: <T>(query: string, ...values: unknown[]) =>
-        queryRawUnsafe(query, ...values) as Promise<T>
-    };
-
-    await searchSimilarChunks(prisma, {
-      userId: "user-1",
+  it("applies a minimum similarity threshold", () => {
+    const results = searchSimilarChunks([createCandidate({ chunkId: "chunk-1", vector: [0, 1] })], {
       paperIds: ["paper-1"],
-      embedding: createEmbedding(0.1),
-      topK: 5
+      embedding: [1, 0],
+      minSimilarity: 0.5
     });
 
-    expect(queryRawUnsafe).toHaveBeenCalledWith(
-      expect.stringContaining('p."userId" = $2::uuid'),
-      expect.stringMatching(/^\[/),
-      "user-1",
-      "paper-1",
-      5
-    );
+    expect(results).toEqual([]);
   });
 
   it("normalizes topK to a safe bounded value", () => {
@@ -43,8 +46,20 @@ describe("vector search", () => {
     expect(normalizeTopK(50)).toBe(20);
     expect(normalizeTopK(3)).toBe(3);
   });
+
+  it("returns NaN for dimension mismatches", () => {
+    expect(cosineSimilarity([1, 0], [1])).toBeNaN();
+  });
 });
 
-function createEmbedding(value: number): number[] {
-  return Array.from({ length: EMBEDDING_DIMENSIONS }, () => value);
+function createCandidate(input: { chunkId: string; paperId?: string; vector: number[] }) {
+  return {
+    paperId: input.paperId ?? "paper-1",
+    chunkId: input.chunkId,
+    pageStart: 1,
+    pageEnd: 1,
+    sectionTitle: null,
+    text: "Candidate text",
+    vectorJson: JSON.stringify(input.vector)
+  };
 }

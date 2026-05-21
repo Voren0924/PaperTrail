@@ -1,5 +1,7 @@
 import { getPrismaClient, type PrismaClient } from "@papertrail/db";
 
+import { ensureLocalUser, LOCAL_USER_ID } from "@/server/local/localUser";
+
 export type PaperRecord = {
   id: string;
   userId: string;
@@ -8,6 +10,7 @@ export type PaperRecord = {
   originalFileName: string;
   storageKey: string;
   fileSha256: string;
+  mimeType: string;
   pageCount: number | null;
   status: string;
   statusMessage: string | null;
@@ -23,16 +26,19 @@ export type JobRecord = {
 };
 
 export type CreatePaperInput = {
+  id: string;
   userId: string;
   originalFileName: string;
   storageKey: string;
   fileSha256: string;
+  mimeType: string;
 };
 
 export type PaperRepository = {
   createPaperWithParseJob(input: CreatePaperInput): Promise<{ paper: PaperRecord; job: JobRecord }>;
   listPapersForUser(userId: string): Promise<PaperRecord[]>;
   findPaperById(paperId: string): Promise<PaperRecord | null>;
+  findPaperByFileSha256(fileSha256: string): Promise<PaperRecord | null>;
   deletePaper(paperId: string): Promise<void>;
   createRetryJob(paperId: string): Promise<JobRecord>;
 };
@@ -40,13 +46,16 @@ export type PaperRepository = {
 export function createPrismaPaperRepository(prisma: PrismaClient = getPrismaClient()): PaperRepository {
   return {
     async createPaperWithParseJob(input) {
+      await ensureLocalUser(prisma);
       return prisma.$transaction(async (tx) => {
         const paper = await tx.paper.create({
           data: {
-            userId: input.userId,
+            id: input.id,
+            userId: input.userId || LOCAL_USER_ID,
             originalFileName: input.originalFileName,
             storageKey: input.storageKey,
             fileSha256: input.fileSha256,
+            mimeType: input.mimeType,
             status: "UPLOADED",
             statusMessage: "Queued for parsing."
           }
@@ -80,6 +89,16 @@ export function createPrismaPaperRepository(prisma: PrismaClient = getPrismaClie
     findPaperById(paperId) {
       return prisma.paper.findUnique({
         where: { id: paperId }
+      });
+    },
+
+    findPaperByFileSha256(fileSha256) {
+      return prisma.paper.findFirst({
+        where: {
+          userId: LOCAL_USER_ID,
+          fileSha256
+        },
+        orderBy: { createdAt: "desc" }
       });
     },
 

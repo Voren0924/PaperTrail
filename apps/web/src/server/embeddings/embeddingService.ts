@@ -1,13 +1,17 @@
 import type { PrismaClient } from "@papertrail/db";
 
+import {
+  createEmbeddingProviderConfigFromSettings,
+  createSettingsService
+} from "@/server/settings/settingsService";
+
 import { CHUNK_VERSION } from "../services/chunkingService";
 import {
   assertEmbeddingDimensions,
   DEFAULT_EMBEDDING_BATCH_SIZE,
   EMBEDDING_DIMENSIONS,
   type EmbeddingProvider,
-  EmbeddingProviderError,
-  getEmbeddingProviderConfig
+  EmbeddingProviderError
 } from "./embeddingProvider";
 import { createOpenAiCompatibleEmbeddingProvider } from "./openAiCompatibleEmbeddingProvider";
 
@@ -21,6 +25,7 @@ export type EmbeddableChunk = {
 
 export type EmbeddingRepository = {
   findPendingPaperChunks(input: {
+    provider: string;
     paperId: string;
     model: string;
     chunkVersion: number;
@@ -28,6 +33,7 @@ export type EmbeddingRepository = {
   }): Promise<EmbeddableChunk[]>;
   storeChunkEmbedding(input: {
     chunkId: string;
+    provider: string;
     model: string;
     embedding: number[];
   }): Promise<void>;
@@ -65,6 +71,7 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
         let embeddedChunkCount = 0;
         let pendingChunks = await repository.findPendingPaperChunks({
           paperId: input.paperId,
+          provider: provider.name,
           model: provider.model,
           chunkVersion: CHUNK_VERSION,
           limit: batchSize
@@ -81,6 +88,7 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
             pendingChunks.map((chunk, index) =>
               repository.storeChunkEmbedding({
                 chunkId: chunk.id,
+                provider: provider.name,
                 model: provider.model,
                 embedding: providerResult.embeddings[index] ?? []
               })
@@ -90,6 +98,7 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
           embeddedChunkCount += pendingChunks.length;
           pendingChunks = await repository.findPendingPaperChunks({
             paperId: input.paperId,
+            provider: provider.name,
             model: provider.model,
             chunkVersion: CHUNK_VERSION,
             limit: batchSize
@@ -121,52 +130,73 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
 }
 
 export function createConfiguredEmbeddingService(prisma: PrismaClient) {
-  const config = getEmbeddingProviderConfig();
-  const provider = createOpenAiCompatibleEmbeddingProvider(config);
+  const repository = createPrismaEmbeddingRepository(prisma);
+  const settingsService = createSettingsService();
 
-  return createEmbeddingService(createPrismaEmbeddingRepository(prisma), provider);
+  return {
+    async embedPaper(input: EmbedPaperInput): Promise<EmbedPaperResult> {
+      const settings = await settingsService.requireProviderSettings();
+      const provider = createOpenAiCompatibleEmbeddingProvider(
+        createEmbeddingProviderConfigFromSettings(settings)
+      );
+
+      return createEmbeddingService(repository, provider).embedPaper(input);
+    }
+  };
 }
 
 export function createPrismaEmbeddingRepository(prisma: PrismaClient): EmbeddingRepository {
   return {
     async findPendingPaperChunks(input) {
-      return prisma.$queryRawUnsafe<EmbeddableChunk[]>(
-        `
-          SELECT
-            "id",
-            "text",
-            "contentHash",
-            "chunkVersion",
-            "embeddingModel"
-          FROM "PaperChunk"
-          WHERE
-            "paperId" = $1::uuid
-            AND "chunkVersion" = $2
-            AND ("embedding" IS NULL OR "embeddingModel" <> $3)
-          ORDER BY "chunkIndex" ASC
-          LIMIT $4
-        `,
-        input.paperId,
-        input.chunkVersion,
-        input.model,
-        input.limit
-      );
+      return prisma.paperChunk.findMany({
+        where: {
+          paperId: input.paperId,
+          chunkVersion: input.chunkVersion,
+          embeddings: {
+            none: {
+              provider: input.provider,
+              model: input.model
+            }
+          }
+        },
+        orderBy: { chunkIndex: "asc" },
+        take: input.limit,
+        select: {
+          id: true,
+          text: true,
+          contentHash: true,
+          chunkVersion: true,
+          embeddingModel: true
+        }
+      });
     },
     async storeChunkEmbedding(input) {
       assertEmbeddingDimensions(input.embedding, EMBEDDING_DIMENSIONS);
 
-      await prisma.$executeRawUnsafe(
-        `
-          UPDATE "PaperChunk"
-          SET
-            "embedding" = $1::vector,
-            "embeddingModel" = $2
-          WHERE "id" = $3::uuid
-        `,
-        vectorToSqlLiteral(input.embedding),
-        input.model,
-        input.chunkId
-      );
+      await prisma.embedding.upsert({
+        where: {
+          chunkId_provider_model: {
+            chunkId: input.chunkId,
+            provider: input.provider,
+            model: input.model
+          }
+        },
+        update: {
+          dimensions: input.embedding.length,
+          vectorJson: vectorToJson(input.embedding)
+        },
+        create: {
+          chunkId: input.chunkId,
+          provider: input.provider,
+          model: input.model,
+          dimensions: input.embedding.length,
+          vectorJson: vectorToJson(input.embedding)
+        }
+      });
+      await prisma.paperChunk.update({
+        where: { id: input.chunkId },
+        data: { embeddingModel: input.model }
+      });
     },
     async markPaperEmbedding(paperId, message) {
       await prisma.paper.update({
@@ -198,7 +228,7 @@ export function createPrismaEmbeddingRepository(prisma: PrismaClient): Embedding
   };
 }
 
-export function vectorToSqlLiteral(embedding: number[]): string {
+export function vectorToJson(embedding: number[]): string {
   return `[${embedding.map((value) => formatVectorValue(value)).join(",")}]`;
 }
 

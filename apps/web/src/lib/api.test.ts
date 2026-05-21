@@ -16,7 +16,7 @@ describe("apiRequest", () => {
             error: {
               code: "VALIDATION_ERROR",
               message: "Request validation failed.",
-              details: { fields: { email: "Email is required." } }
+              details: { fields: { providerApiKey: "API key is required." } }
             }
           }),
           { status: 422 }
@@ -24,11 +24,11 @@ describe("apiRequest", () => {
       )
     );
 
-    await expect(apiRequest("/api/auth/login")).rejects.toMatchObject({
+    await expect(apiRequest("/api/settings")).rejects.toMatchObject({
       code: "VALIDATION_ERROR",
       message: "Request validation failed.",
       status: 422,
-      details: { fields: { email: "Email is required." } }
+      details: { fields: { providerApiKey: "API key is required." } }
     });
   });
 
@@ -36,9 +36,9 @@ describe("apiRequest", () => {
     const result = await toApiResult(
       Promise.reject(
         new ApiClientError({
-          code: "UNAUTHENTICATED",
-          message: "Sign in is required.",
-          status: 401,
+          code: "SETTINGS_REQUIRED",
+          message: "Provider settings are required before using this feature.",
+          status: 409,
           details: {}
         })
       )
@@ -47,8 +47,8 @@ describe("apiRequest", () => {
     expect(result).toEqual({
       data: null,
       error: {
-        code: "UNAUTHENTICATED",
-        message: "Sign in is required.",
+        code: "SETTINGS_REQUIRED",
+        message: "Provider settings are required before using this feature.",
         details: {}
       }
     });

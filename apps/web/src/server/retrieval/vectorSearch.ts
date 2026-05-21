@@ -1,15 +1,21 @@
-import { assertEmbeddingDimensions, EMBEDDING_DIMENSIONS } from "../embeddings/embeddingProvider";
-import { vectorToSqlLiteral } from "../embeddings/embeddingService";
-
 export const DEFAULT_RETRIEVAL_TOP_K = 8;
 export const MAX_RETRIEVAL_TOP_K = 20;
 
 export type VectorSearchInput = {
-  userId: string;
   paperIds: string[];
   embedding: number[];
   topK?: number;
   minSimilarity?: number;
+};
+
+export type VectorSearchCandidate = {
+  paperId: string;
+  chunkId: string;
+  pageStart: number;
+  pageEnd: number;
+  sectionTitle: string | null;
+  text: string;
+  vectorJson: string;
 };
 
 export type VectorSearchResult = {
@@ -22,65 +28,36 @@ export type VectorSearchResult = {
   similarityScore: number;
 };
 
-export type VectorSearchClient = {
-  $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
-};
-
-export async function searchSimilarChunks(
-  prisma: VectorSearchClient,
+export function searchSimilarChunks(
+  candidates: VectorSearchCandidate[],
   input: VectorSearchInput
-): Promise<VectorSearchResult[]> {
-  assertEmbeddingDimensions(input.embedding, EMBEDDING_DIMENSIONS);
-
+): VectorSearchResult[] {
   if (input.paperIds.length === 0) {
     return [];
   }
 
-  const query = buildVectorSearchSql(input.paperIds, input.minSimilarity);
+  const paperIds = new Set(input.paperIds);
   const topK = normalizeTopK(input.topK);
 
-  return prisma.$queryRawUnsafe<VectorSearchResult[]>(
-    query,
-    vectorToSqlLiteral(input.embedding),
-    input.userId,
-    ...input.paperIds,
-    ...(input.minSimilarity === undefined ? [] : [input.minSimilarity]),
-    topK
-  );
-}
-
-export function buildVectorSearchSql(paperIds: string[], minSimilarity: number | undefined): string {
-  if (paperIds.length === 0) {
-    throw new Error("At least one paper ID is required for vector search.");
-  }
-
-  const paperPlaceholders = paperIds.map((_, index) => `$${index + 3}::uuid`).join(", ");
-  const minSimilarityClause =
-    minSimilarity === undefined
-      ? ""
-      : `AND (1 - (c."embedding" <=> $1::vector)) >= $${paperIds.length + 3}`;
-  const limitPlaceholder = `$${paperIds.length + (minSimilarity === undefined ? 3 : 4)}`;
-
-  return `
-    SELECT
-      c."paperId" AS "paperId",
-      c."id" AS "chunkId",
-      c."startPage" AS "pageStart",
-      c."endPage" AS "pageEnd",
-      s."title" AS "sectionTitle",
-      c."text" AS "text",
-      (1 - (c."embedding" <=> $1::vector))::double precision AS "similarityScore"
-    FROM "PaperChunk" c
-    INNER JOIN "Paper" p ON p."id" = c."paperId"
-    LEFT JOIN "PaperSection" s ON s."id" = c."sectionId"
-    WHERE
-      p."userId" = $2::uuid
-      AND c."paperId" IN (${paperPlaceholders})
-      AND c."embedding" IS NOT NULL
-      ${minSimilarityClause}
-    ORDER BY c."embedding" <=> $1::vector ASC, c."chunkIndex" ASC
-    LIMIT ${limitPlaceholder}
-  `;
+  return candidates
+    .filter((candidate) => paperIds.has(candidate.paperId))
+    .map((candidate) => ({
+      candidate,
+      similarityScore: cosineSimilarity(input.embedding, parseVectorJson(candidate.vectorJson))
+    }))
+    .filter((result) => Number.isFinite(result.similarityScore))
+    .filter((result) => input.minSimilarity === undefined || result.similarityScore >= input.minSimilarity)
+    .sort((left, right) => right.similarityScore - left.similarityScore || left.candidate.chunkId.localeCompare(right.candidate.chunkId))
+    .slice(0, topK)
+    .map(({ candidate, similarityScore }) => ({
+      paperId: candidate.paperId,
+      chunkId: candidate.chunkId,
+      pageStart: candidate.pageStart,
+      pageEnd: candidate.pageEnd,
+      sectionTitle: candidate.sectionTitle,
+      text: candidate.text,
+      similarityScore
+    }));
 }
 
 export function normalizeTopK(topK: number | undefined): number {
@@ -93,4 +70,39 @@ export function normalizeTopK(topK: number | undefined): number {
   }
 
   return Math.min(topK, MAX_RETRIEVAL_TOP_K);
+}
+
+export function cosineSimilarity(left: number[], right: number[]): number {
+  if (left.length === 0 || left.length !== right.length) {
+    return Number.NaN;
+  }
+
+  let dotProduct = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+
+    dotProduct += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+
+  if (leftMagnitude === 0 || rightMagnitude === 0) {
+    return Number.NaN;
+  }
+
+  return dotProduct / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+export function parseVectorJson(vectorJson: string): number[] {
+  const parsed = JSON.parse(vectorJson) as unknown;
+
+  if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "number")) {
+    return [];
+  }
+
+  return parsed;
 }

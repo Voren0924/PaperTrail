@@ -7,6 +7,7 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "UPLOAD_TOO_LARGE"
+  | "SETTINGS_REQUIRED"
   | "BAD_REQUEST"
   | "INTERNAL_ERROR";
 
@@ -71,6 +72,13 @@ export class UploadTooLargeError extends ApplicationError {
   constructor(maxUploadMb: number, message = "Upload exceeds the configured size limit.") {
     super("UPLOAD_TOO_LARGE", message, 413, { maxUploadMb });
     this.name = "UploadTooLargeError";
+  }
+}
+
+export class SettingsRequiredError extends ApplicationError {
+  constructor(message = "Provider settings are required before using this feature.", details: ErrorDetails = {}) {
+    super("SETTINGS_REQUIRED", message, 409, details);
+    this.name = "SettingsRequiredError";
   }
 }
 

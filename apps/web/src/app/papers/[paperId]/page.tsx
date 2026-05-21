@@ -1,4 +1,3 @@
-import { AuthGate } from "@/components/AuthGate";
 import { PaperDetailPage } from "@/components/PaperDetailPage";
 
 type PaperPageProps = {
@@ -10,9 +9,5 @@ type PaperPageProps = {
 export default async function PaperPage({ params }: PaperPageProps) {
   const { paperId } = await params;
 
-  return (
-    <AuthGate>
-      <PaperDetailPage paperId={paperId} />
-    </AuthGate>
-  );
+  return <PaperDetailPage paperId={paperId} />;
 }

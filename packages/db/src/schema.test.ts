@@ -11,7 +11,7 @@ const migrationPath = resolve(
 );
 
 describe("Prisma schema", () => {
-  it("contains the required Thread B models", async () => {
+  it("contains the required local desktop models", async () => {
     const schema = await readFile(schemaPath, "utf8");
     const models = [
       "User",
@@ -29,7 +29,9 @@ describe("Prisma schema", () => {
       "ChatCitedClaim",
       "ResearchNote",
       "ResearchNoteCitation",
-      "Job"
+      "Job",
+      "Embedding",
+      "Setting"
     ];
 
     for (const model of models) {
@@ -37,28 +39,22 @@ describe("Prisma schema", () => {
     }
   });
 
-  it("contains the required enums", async () => {
-    const schema = await readFile(schemaPath, "utf8");
-    const enums = [
-      "PaperStatus",
-      "JobStatus",
-      "JobType",
-      "ChatRole",
-      "MessageStatus",
-      "ChatScopeType"
-    ];
-
-    for (const enumName of enums) {
-      expect(schema).toContain(`enum ${enumName} {`);
-    }
-  });
-
-  it("documents the pgvector-compatible embedding strategy", async () => {
+  it("uses SQLite for local-first desktop persistence", async () => {
     const schema = await readFile(schemaPath, "utf8");
     const migration = await readFile(migrationPath, "utf8");
 
-    expect(schema).toContain('embedding       Unsupported("vector(1536)")?');
-    expect(migration).toContain("CREATE EXTENSION IF NOT EXISTS vector");
-    expect(migration).toContain("USING ivfflat (embedding vector_cosine_ops)");
+    expect(schema).toContain('provider = "sqlite"');
+    expect(migration).toContain('CREATE TABLE "Setting"');
+    expect(migration).toContain('CREATE TABLE "Embedding"');
+  });
+
+  it("documents the SQLite-friendly embedding strategy", async () => {
+    const schema = await readFile(schemaPath, "utf8");
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(schema).toContain("vectorJson String");
+    expect(schema).toContain("@@unique([chunkId, provider, model])");
+    expect(migration).not.toContain("CREATE EXTENSION");
+    expect(migration).not.toContain("ivfflat");
   });
 });

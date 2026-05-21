@@ -3,50 +3,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-enum PaperStatus {
-  UPLOADED
-  PARSING
-  EMBEDDING
-  READY
-  FAILED
-}
-
-enum JobStatus {
-  QUEUED
-  RUNNING
-  SUCCEEDED
-  FAILED
-}
-
-enum JobType {
-  PARSE_PAPER
-  EMBED_PAPER
-  RETRY_PAPER
-}
-
-enum ChatRole {
-  USER
-  ASSISTANT
-  SYSTEM
-}
-
-enum MessageStatus {
-  PENDING
-  SUCCEEDED
-  FAILED
-}
-
-enum ChatScopeType {
-  PAPER
-  COLLECTION
-}
-
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String   @id @default(uuid())
   email        String   @unique
   name         String?
   passwordHash String?
@@ -60,8 +22,8 @@ model User {
 }
 
 model Session {
-  id               String    @id @default(uuid()) @db.Uuid
-  userId           String    @db.Uuid
+  id               String    @id @default(uuid())
+  userId           String
   sessionTokenHash String    @unique
   expiresAt        DateTime
   createdAt        DateTime  @default(now())
@@ -75,8 +37,8 @@ model Session {
 }
 
 model Paper {
-  id                 String      @id @default(uuid()) @db.Uuid
-  userId             String      @db.Uuid
+  id                 String   @id @default(uuid())
+  userId             String   @default("local")
   title              String?
   abstract           String?
   publicationYear    Int?
@@ -86,12 +48,13 @@ model Paper {
   originalFileName   String
   storageKey         String
   fileSha256         String
+  mimeType           String   @default("application/pdf")
   pageCount          Int?
-  status             PaperStatus @default(UPLOADED)
+  status             String   @default("UPLOADED")
   statusMessage      String?
   metadataConfidence Float?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   authors           PaperAuthor[]
@@ -110,8 +73,8 @@ model Paper {
 }
 
 model PaperAuthor {
-  id       String @id @default(uuid()) @db.Uuid
-  paperId  String @db.Uuid
+  id       String @id @default(uuid())
+  paperId  String
   name     String
   position Int
 
@@ -121,8 +84,8 @@ model PaperAuthor {
 }
 
 model PaperPage {
-  id         String   @id @default(uuid()) @db.Uuid
-  paperId    String   @db.Uuid
+  id         String   @id @default(uuid())
+  paperId    String
   pageNumber Int
   text       String
   charCount  Int
@@ -134,8 +97,8 @@ model PaperPage {
 }
 
 model PaperSection {
-  id              String @id @default(uuid()) @db.Uuid
-  paperId         String @db.Uuid
+  id              String @id @default(uuid())
+  paperId         String
   title           String
   normalizedTitle String
   startPage       Int?
@@ -149,9 +112,9 @@ model PaperSection {
 }
 
 model PaperChunk {
-  id              String                       @id @default(uuid()) @db.Uuid
-  paperId         String                       @db.Uuid
-  sectionId       String?                      @db.Uuid
+  id              String   @id @default(uuid())
+  paperId         String
+  sectionId       String?
   chunkIndex      Int
   text            String
   tokenCount      Int
@@ -162,12 +125,12 @@ model PaperChunk {
   pageTextOffsets Json?
   contentHash     String
   chunkVersion    Int
-  embedding       Unsupported("vector(1536)")?
-  embeddingModel  String
-  createdAt       DateTime                     @default(now())
+  embeddingModel  String   @default("pending")
+  createdAt       DateTime @default(now())
 
   paper                 Paper                  @relation(fields: [paperId], references: [id], onDelete: Cascade)
   section               PaperSection?          @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  embeddings            Embedding[]
   chatCitations         ChatCitation[]
   researchNoteCitations ResearchNoteCitation[]
 
@@ -176,9 +139,25 @@ model PaperChunk {
   @@index([paperId, contentHash])
 }
 
+model Embedding {
+  id         String   @id @default(uuid())
+  chunkId    String
+  provider   String
+  model      String
+  dimensions Int
+  vectorJson String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  chunk PaperChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@unique([chunkId, provider, model])
+  @@index([provider, model])
+}
+
 model PaperReference {
-  id          String  @id @default(uuid()) @db.Uuid
-  paperId     String  @db.Uuid
+  id          String  @id @default(uuid())
+  paperId     String
   rawText     String
   title       String?
   authorsText String?
@@ -193,12 +172,12 @@ model PaperReference {
 }
 
 model ChatSession {
-  id        String        @id @default(uuid()) @db.Uuid
-  userId    String        @db.Uuid
+  id        String   @id @default(uuid())
+  userId    String   @default("local")
   title     String?
-  scopeType ChatScopeType
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  scopeType String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   papers   ChatSessionPaper[]
@@ -206,9 +185,9 @@ model ChatSession {
 }
 
 model ChatSessionPaper {
-  id            String @id @default(uuid()) @db.Uuid
-  chatSessionId String @db.Uuid
-  paperId       String @db.Uuid
+  id            String @id @default(uuid())
+  chatSessionId String
+  paperId       String
 
   chatSession ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
   paper       Paper       @relation(fields: [paperId], references: [id], onDelete: Cascade)
@@ -217,10 +196,10 @@ model ChatSessionPaper {
 }
 
 model ChatMessage {
-  id                String        @id @default(uuid()) @db.Uuid
-  chatSessionId     String        @db.Uuid
-  role              ChatRole
-  status            MessageStatus
+  id                String   @id @default(uuid())
+  chatSessionId     String
+  role              String
+  status            String
   content           String
   model             String?
   promptVersion     String?
@@ -229,7 +208,7 @@ model ChatMessage {
   providerRequestId String?
   llmTraceId        String?
   errorCode         String?
-  createdAt         DateTime      @default(now())
+  createdAt         DateTime @default(now())
 
   chatSession ChatSession      @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
   citations   ChatCitation[]
@@ -239,10 +218,10 @@ model ChatMessage {
 }
 
 model ChatCitation {
-  id            String  @id @default(uuid()) @db.Uuid
-  chatMessageId String  @db.Uuid
-  paperId       String  @db.Uuid
-  chunkId       String  @db.Uuid
+  id            String  @id @default(uuid())
+  chatMessageId String
+  paperId       String
+  chunkId       String
   pageStart     Int
   pageEnd       Int
   quote         String?
@@ -256,8 +235,8 @@ model ChatCitation {
 }
 
 model ChatCitedClaim {
-  id            String @id @default(uuid()) @db.Uuid
-  chatMessageId String @db.Uuid
+  id            String @id @default(uuid())
+  chatMessageId String
   claimText     String
   citationIds   Json
   position      Int
@@ -268,8 +247,8 @@ model ChatCitedClaim {
 }
 
 model ResearchNote {
-  id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @db.Uuid
+  id              String   @id @default(uuid())
+  userId          String   @default("local")
   title           String
   contentMarkdown String
   createdAt       DateTime @default(now())
@@ -280,10 +259,10 @@ model ResearchNote {
 }
 
 model ResearchNoteCitation {
-  id             String  @id @default(uuid()) @db.Uuid
-  researchNoteId String  @db.Uuid
-  paperId        String  @db.Uuid
-  chunkId        String? @db.Uuid
+  id             String  @id @default(uuid())
+  researchNoteId String
+  paperId        String
+  chunkId        String?
   pageStart      Int
   pageEnd        Int
   quote          String?
@@ -294,10 +273,10 @@ model ResearchNoteCitation {
 }
 
 model Job {
-  id              String    @id @default(uuid()) @db.Uuid
-  type            JobType
-  status          JobStatus @default(QUEUED)
-  paperId         String?   @db.Uuid
+  id              String    @id @default(uuid())
+  type            String
+  status          String    @default("QUEUED")
+  paperId         String?
   payload         Json
   attempts        Int       @default(0)
   maxAttempts     Int       @default(3)
@@ -316,4 +295,10 @@ model Job {
   @@index([status, createdAt])
   @@index([status, runAfter])
   @@index([lockedAt])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }

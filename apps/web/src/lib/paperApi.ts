@@ -11,7 +11,7 @@ export type PaperResponse = {
 
 export type PaperUploadResponse = {
   paper: Paper;
-  job: Job;
+  job: Job | null;
 };
 
 export function listPapers(): Promise<PaperListResponse> {

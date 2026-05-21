@@ -3,12 +3,16 @@ import { randomUUID } from "node:crypto";
 import { getPrismaClient, type PrismaClient } from "@papertrail/db";
 
 import { ConflictError, NotFoundError } from "@/server/errors/application-error";
+import { ensureLocalUser } from "@/server/local/localUser";
 
 import type { RetrievalResult } from "../retrieval/retrievalService";
 import { createConfiguredRetrievalService, type RetrievedChunk } from "../retrieval/retrievalService";
 import type { ChatProvider } from "./chatProvider";
-import { getChatProviderConfig } from "./chatProvider";
 import { createOpenAiCompatibleChatProvider } from "./openAiCompatibleChatProvider";
+import {
+  createChatProviderConfigFromSettings,
+  createSettingsService
+} from "../settings/settingsService";
 import { buildGroundedAnswerMessages, GROUNDED_ANSWER_PROMPT_VERSION } from "./promptBuilder";
 import {
   type AnswerCitation,
@@ -96,7 +100,7 @@ const DEFAULT_RETRY_TEMPERATURE = 0;
 export function createChatService(
   repository: ChatRepository = createPrismaChatRepository(),
   retrievalService: RetrievalService = createConfiguredRetrievalService(getPrismaClient()),
-  chatProvider: ChatProvider = createOpenAiCompatibleChatProvider(getChatProviderConfig())
+  chatProvider?: ChatProvider
 ) {
   return {
     async answerQuestion(input: ChatServiceInput): Promise<ChatServiceResult> {
@@ -124,17 +128,18 @@ export function createChatService(
         query: input.question,
         paperIds
       });
+      const configuredChatProvider = chatProvider ?? (await createLocalChatProvider());
       const groundedAnswer =
         retrieval.chunks.length === 0
           ? createInsufficientEvidenceAnswer(input.question)
-          : await generateValidatedAnswer(chatProvider, input.question, retrieval.chunks);
+          : await generateValidatedAnswer(configuredChatProvider, input.question, retrieval.chunks);
 
       const assistantMessage = await repository.createMessage({
         chatSessionId: chatSession.id,
         role: "ASSISTANT",
         status: "SUCCEEDED",
         content: groundedAnswer.answer,
-        model: chatProvider.model,
+        model: configuredChatProvider.model,
         promptVersion: GROUNDED_ANSWER_PROMPT_VERSION,
         retrievalMetadata: {
           selectedPaperIds: paperIds,
@@ -166,6 +171,12 @@ export function createChatService(
   };
 }
 
+async function createLocalChatProvider(): Promise<ChatProvider> {
+  const settings = await createSettingsService().requireProviderSettings();
+
+  return createOpenAiCompatibleChatProvider(createChatProviderConfigFromSettings(settings));
+}
+
 export function createPrismaChatRepository(prisma: PrismaClient = getPrismaClient()): ChatRepository {
   return {
     findPapersForUser(input) {
@@ -191,9 +202,10 @@ export function createPrismaChatRepository(prisma: PrismaClient = getPrismaClien
           userId: true,
           scopeType: true
         }
-      });
+      }).then((session) => (session ? { ...session, scopeType: session.scopeType as ChatScopeType } : null));
     },
     async createChatSession(input) {
+      await ensureLocalUser(prisma);
       return prisma.chatSession.create({
         data: {
           userId: input.userId,
@@ -208,7 +220,7 @@ export function createPrismaChatRepository(prisma: PrismaClient = getPrismaClien
           userId: true,
           scopeType: true
         }
-      });
+      }).then((session) => ({ ...session, scopeType: session.scopeType as ChatScopeType }));
     },
     createMessage(input) {
       return prisma.chatMessage.create({

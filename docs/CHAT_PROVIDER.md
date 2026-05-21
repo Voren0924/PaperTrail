@@ -1,5 +1,7 @@
 # Grounded Answering And Chat Provider
 
+Desktop MVP update: chat provider configuration now comes from local Settings (`providerBaseUrl`, `providerApiKey`, `chatModel`, and `embeddingModel`). The MVP no longer requires `CHAT_API_KEY` or login/session state for the core chat flow.
+
 Thread G adds the backend chat foundation for citation-grounded answers. It uses Thread F retrieval as its only evidence source and does not implement frontend UI.
 
 ## Configuration

@@ -1,5 +1,7 @@
 # Embeddings And Retrieval
 
+Desktop MVP update: embeddings are configured from local Settings, not required server environment secrets. SQLite stores vectors in the `Embedding.vectorJson` column, and retrieval ranks local candidates with TypeScript cosine similarity instead of pgvector.
+
 Thread F adds the server-side foundation for embedding paper chunks and retrieving relevant evidence chunks. It does not generate natural-language answers or implement chat response synthesis.
 
 ## Configuration

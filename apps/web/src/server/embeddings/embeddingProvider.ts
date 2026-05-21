@@ -83,7 +83,7 @@ export function parseEmbeddingDimensions(rawValue: string | undefined): number {
 
   if (dimensions !== EMBEDDING_DIMENSIONS) {
     throw new EmbeddingConfigurationError(
-      `EMBEDDING_DIMENSIONS must match the PaperChunk.embedding vector(${EMBEDDING_DIMENSIONS}) column.`
+      `EMBEDDING_DIMENSIONS must match the local embedding vector size (${EMBEDDING_DIMENSIONS}).`
     );
   }
 

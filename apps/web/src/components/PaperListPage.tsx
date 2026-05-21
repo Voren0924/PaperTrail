@@ -62,10 +62,10 @@ export function PaperListContent({ papers }: { papers: Paper[] }) {
       <div className="section-heading">
         <div>
           <p className="eyebrow">Library</p>
-          <h1 id="papers-title">Your papers</h1>
+          <h1 id="papers-title">Documents</h1>
         </div>
         <Link className="button button--primary" href="/papers/new">
-          Upload PDF
+          Import PDF
         </Link>
       </div>
       <div className="paper-list">

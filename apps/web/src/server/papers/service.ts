@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+
 import { ensureOwnedRecord } from "@/server/auth/ownership";
+import { LOCAL_USER_ID } from "@/server/local/localUser";
 import { getStorageConfig, type StorageConfig } from "@/server/storage/config";
 import { sha256Hex } from "@/server/storage/hash";
 import { createPdfStorageKey } from "@/server/storage/keys";
@@ -8,16 +11,16 @@ import { createPrismaPaperRepository, type JobRecord, type PaperRecord, type Pap
 import { validateUploadedPdf } from "./validation";
 
 export type PaperService = {
-  uploadPaper(input: { currentUserId: string; file: FormDataEntryValue | null }): Promise<PaperUploadResult>;
-  listPapers(input: { currentUserId: string }): Promise<{ papers: PaperApiRecord[] }>;
-  getPaper(input: { currentUserId: string; paperId: string }): Promise<{ paper: PaperApiRecord }>;
-  deletePaper(input: { currentUserId: string; paperId: string }): Promise<{ paperId: string }>;
-  retryPaper(input: { currentUserId: string; paperId: string }): Promise<{ paper: PaperApiRecord; job: JobApiRecord }>;
+  uploadPaper(input: { currentUserId?: string; file: FormDataEntryValue | null }): Promise<PaperUploadResult>;
+  listPapers(input?: { currentUserId?: string }): Promise<{ papers: PaperApiRecord[] }>;
+  getPaper(input: { currentUserId?: string; paperId: string }): Promise<{ paper: PaperApiRecord }>;
+  deletePaper(input: { currentUserId?: string; paperId: string }): Promise<{ paperId: string }>;
+  retryPaper(input: { currentUserId?: string; paperId: string }): Promise<{ paper: PaperApiRecord; job: JobApiRecord }>;
 };
 
 export type PaperUploadResult = {
   paper: PaperApiRecord;
-  job: JobApiRecord;
+  job: JobApiRecord | null;
 };
 
 export type PaperApiRecord = {
@@ -26,6 +29,7 @@ export type PaperApiRecord = {
   abstract: string | null;
   originalFileName: string;
   fileSha256: string;
+  mimeType: string;
   pageCount: number | null;
   status: string;
   statusMessage: string | null;
@@ -50,10 +54,19 @@ export function createPaperService(
       const file = validateUploadedPdf(input.file, config);
       const bytes = new Uint8Array(await file.arrayBuffer());
       const fileSha256 = sha256Hex(bytes);
+      const duplicate = await repository.findPaperByFileSha256(fileSha256);
+
+      if (duplicate) {
+        return {
+          paper: toPaperApiRecord(duplicate),
+          job: null
+        };
+      }
+
+      const paperId = randomUUID();
       const storageKey = createPdfStorageKey({
-        userId: input.currentUserId,
-        originalFileName: file.name,
-        fileSha256
+        paperId,
+        originalFileName: file.name
       });
 
       await storage.putObject({
@@ -64,10 +77,12 @@ export function createPaperService(
 
       try {
         const result = await repository.createPaperWithParseJob({
-          userId: input.currentUserId,
+          id: paperId,
+          userId: input.currentUserId ?? LOCAL_USER_ID,
           originalFileName: file.name,
           storageKey,
-          fileSha256
+          fileSha256,
+          mimeType: file.type || "application/pdf"
         });
 
         return {
@@ -81,13 +96,13 @@ export function createPaperService(
     },
 
     async listPapers(input) {
-      const papers = await repository.listPapersForUser(input.currentUserId);
+      const papers = await repository.listPapersForUser(input?.currentUserId ?? LOCAL_USER_ID);
 
       return { papers: papers.map(toPaperApiRecord) };
     },
 
     async getPaper(input) {
-      const paper = ensureOwnedRecord(await repository.findPaperById(input.paperId), input.currentUserId, {
+      const paper = ensureOwnedRecord(await repository.findPaperById(input.paperId), input.currentUserId ?? LOCAL_USER_ID, {
         resourceName: "Paper"
       });
 
@@ -95,7 +110,7 @@ export function createPaperService(
     },
 
     async deletePaper(input) {
-      const paper = ensureOwnedRecord(await repository.findPaperById(input.paperId), input.currentUserId, {
+      const paper = ensureOwnedRecord(await repository.findPaperById(input.paperId), input.currentUserId ?? LOCAL_USER_ID, {
         resourceName: "Paper"
       });
 
@@ -106,7 +121,7 @@ export function createPaperService(
     },
 
     async retryPaper(input) {
-      const paper = ensureOwnedRecord(await repository.findPaperById(input.paperId), input.currentUserId, {
+      const paper = ensureOwnedRecord(await repository.findPaperById(input.paperId), input.currentUserId ?? LOCAL_USER_ID, {
         resourceName: "Paper"
       });
       const job = await repository.createRetryJob(paper.id);
@@ -126,6 +141,7 @@ export function toPaperApiRecord(paper: PaperRecord): PaperApiRecord {
     abstract: paper.abstract,
     originalFileName: paper.originalFileName,
     fileSha256: paper.fileSha256,
+    mimeType: paper.mimeType,
     pageCount: paper.pageCount,
     status: paper.status,
     statusMessage: paper.statusMessage,

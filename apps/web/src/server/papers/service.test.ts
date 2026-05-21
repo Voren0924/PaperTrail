@@ -24,14 +24,30 @@ describe("paper service", () => {
     });
 
     const result = await service.uploadPaper({
-      currentUserId: "user-1",
       file
     });
 
     expect(result.paper.originalFileName).toBe("paper.pdf");
     expect(result.paper.status).toBe("UPLOADED");
     expect(result.paper.fileSha256).toBe("86edbaa24831badfa0a8b04bb410141e2ee4182b6d0014493fe262a7a331c20b");
-    expect(result.job.type).toBe("PARSE_PAPER");
+    expect(result.job?.type).toBe("PARSE_PAPER");
+    expect(result.paper.mimeType).toBe("application/pdf");
+    expect(storage.objects.size).toBe(1);
+  });
+
+  it("reuses an existing imported PDF when the file hash already exists", async () => {
+    const repository = new FakePaperRepository();
+    const storage = new FakeStorageAdapter();
+    const service = createPaperService(repository, storage, storageConfig);
+    const file = new File([new TextEncoder().encode("%PDF-1.7")], "paper.pdf", {
+      type: "application/pdf"
+    });
+
+    const first = await service.uploadPaper({ file });
+    const second = await service.uploadPaper({ file });
+
+    expect(second.paper.id).toBe(first.paper.id);
+    expect(second.job).toBeNull();
     expect(storage.objects.size).toBe(1);
   });
 
@@ -45,7 +61,6 @@ describe("paper service", () => {
 
     await expect(
       service.uploadPaper({
-        currentUserId: "user-1",
         file
       })
     ).rejects.toThrow("create failed");
@@ -57,15 +72,19 @@ describe("paper service", () => {
     const service = createPaperService(repository, new FakeStorageAdapter(), storageConfig);
     await repository.createPaperWithParseJob({
       userId: "user-1",
+      id: "paper-a",
       originalFileName: "a.pdf",
       storageKey: "papers/user-1/a.pdf",
-      fileSha256: "hash-a"
+      fileSha256: "hash-a",
+      mimeType: "application/pdf"
     });
     await repository.createPaperWithParseJob({
       userId: "user-2",
+      id: "paper-b",
       originalFileName: "b.pdf",
       storageKey: "papers/user-2/b.pdf",
-      fileSha256: "hash-b"
+      fileSha256: "hash-b",
+      mimeType: "application/pdf"
     });
 
     const result = await service.listPapers({ currentUserId: "user-1" });
@@ -79,9 +98,11 @@ describe("paper service", () => {
     const service = createPaperService(repository, new FakeStorageAdapter(), storageConfig);
     const { paper } = await repository.createPaperWithParseJob({
       userId: "user-2",
+      id: "paper-foreign",
       originalFileName: "paper.pdf",
       storageKey: "papers/user-2/paper.pdf",
-      fileSha256: "hash"
+      fileSha256: "hash",
+      mimeType: "application/pdf"
     });
 
     await expect(service.getPaper({ currentUserId: "user-1", paperId: paper.id })).rejects.toThrow(NotFoundError);
@@ -95,9 +116,11 @@ describe("paper service", () => {
     const service = createPaperService(repository, storage, storageConfig);
     const { paper } = await repository.createPaperWithParseJob({
       userId: "user-1",
+      id: "paper-owned",
       originalFileName: "paper.pdf",
       storageKey: "papers/user-1/paper.pdf",
-      fileSha256: "hash"
+      fileSha256: "hash",
+      mimeType: "application/pdf"
     });
     storage.objects.set(paper.storageKey, new Uint8Array([1]));
 
@@ -113,9 +136,11 @@ describe("paper service", () => {
     const service = createPaperService(repository, new FakeStorageAdapter(), storageConfig);
     const { paper } = await repository.createPaperWithParseJob({
       userId: "user-1",
+      id: "paper-retry",
       originalFileName: "paper.pdf",
       storageKey: "papers/user-1/paper.pdf",
-      fileSha256: "hash"
+      fileSha256: "hash",
+      mimeType: "application/pdf"
     });
 
     const result = await service.retryPaper({ currentUserId: "user-1", paperId: paper.id });
@@ -179,6 +204,10 @@ class FakePaperRepository implements PaperRepository {
     return Promise.resolve(this.papers.get(paperId) ?? null);
   }
 
+  findPaperByFileSha256(fileSha256: string) {
+    return Promise.resolve([...this.papers.values()].find((paper) => paper.fileSha256 === fileSha256) ?? null);
+  }
+
   deletePaper(paperId: string) {
     this.papers.delete(paperId);
     return Promise.resolve();
@@ -192,13 +221,14 @@ class FakePaperRepository implements PaperRepository {
     this.paperCounter += 1;
 
     const paper: PaperRecord = {
-      id: `paper-${this.paperCounter}`,
+      id: input.id || `paper-${this.paperCounter}`,
       userId: input.userId,
       title: null,
       abstract: null,
       originalFileName: input.originalFileName,
       storageKey: input.storageKey,
       fileSha256: input.fileSha256,
+      mimeType: input.mimeType,
       pageCount: null,
       status: "UPLOADED",
       statusMessage: "Queued for parsing.",

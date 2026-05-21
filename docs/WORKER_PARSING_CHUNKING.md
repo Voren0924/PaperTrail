@@ -1,5 +1,7 @@
 # Worker, PDF Parsing, And Chunking
 
+Desktop MVP update: the worker reads PDFs from the local app data directory (`PAPERTRAIL_APP_DATA_DIR`, default `.data/PaperTrail`) and uses provider settings saved in SQLite for embedding jobs. PostgreSQL and pgvector are no longer required for the MVP.
+
 Thread E adds a local worker process that claims database-backed ingestion jobs, parses PDF text, creates deterministic chunks, and stores parser output for later retrieval work.
 
 ## Run Locally

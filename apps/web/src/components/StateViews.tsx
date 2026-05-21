@@ -24,10 +24,10 @@ export function ErrorState({ message, action }: { message: string; action?: Reac
 export function EmptyPapersState() {
   return (
     <div className="empty-state">
-      <h2>No papers yet</h2>
-      <p>Upload a PDF to start extracting metadata, chunks, citations, and grounded answers.</p>
+      <h2>No documents yet</h2>
+      <p>Import a PDF to start extracting metadata, chunks, citations, and grounded answers locally.</p>
       <Link className="button button--primary" href="/papers/new">
-        Upload PDF
+        Import PDF
       </Link>
     </div>
   );

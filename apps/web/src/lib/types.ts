@@ -30,6 +30,7 @@ export type Paper = {
   abstract: string | null;
   originalFileName: string;
   fileSha256: string;
+  mimeType: string;
   pageCount: number | null;
   status: PaperStatus;
   statusMessage: string | null;
@@ -42,6 +43,15 @@ export type Job = {
   paperId: string | null;
   type: string;
   status: string;
+};
+
+export type ProviderSettings = {
+  providerBaseUrl: string;
+  hasApiKey: boolean;
+  chatModel: string;
+  embeddingModel: string;
+  isComplete: boolean;
+  missing: string[];
 };
 
 export type ChatCitation = {

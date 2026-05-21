@@ -5,7 +5,7 @@ import { getStorageConfig, StorageConfigurationError } from "./config";
 describe("storage config", () => {
   it("uses local storage defaults and upload limit overrides", () => {
     const config = getStorageConfig({
-      LOCAL_STORAGE_DIR: ".data/test-uploads",
+      PAPERTRAIL_APP_DATA_DIR: ".data/test-papertrail",
       MAX_UPLOAD_MB: "25"
     });
 

@@ -115,6 +115,7 @@ a {
 .paper-meta,
 .chat-panel,
 .evidence-preview,
+.settings-panel,
 .upload-form {
   max-width: 760px;
   border: 1px solid var(--border);
@@ -245,6 +246,7 @@ a {
 }
 
 .auth-form,
+.settings-form,
 .upload-form,
 .stack {
   display: grid;

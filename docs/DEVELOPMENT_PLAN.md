@@ -1,5 +1,19 @@
 # PaperTrail Development Plan
 
+## 0. Desktop MVP Direction Update
+
+PaperTrail is no longer a web/SaaS MVP. The active MVP direction is a local-first desktop PDF question-answering app that stores PDFs, parsed text, chunks, embeddings, conversations, and provider settings locally.
+
+This update supersedes older auth, PostgreSQL, pgvector, cloud deployment, and account-oriented notes elsewhere in this historical plan:
+
+- No registration, login, logout, organizations, workspaces, teams, billing, or subscriptions are required for the MVP.
+- The app has one implicit local owner identified as `LOCAL_USER_ID = "local"` where compatibility with existing service code still needs an owner value.
+- Local persistence uses SQLite through Prisma.
+- Embeddings are stored locally in an `Embedding` table as JSON vectors and ranked with TypeScript cosine similarity for MVP-scale libraries.
+- Provider settings are entered in the Settings screen and stored locally. User API keys must not be committed or logged.
+- Next.js API routes are now a temporary local bridge; Tauri commands should call the same service modules in a later packaging pass.
+- See `docs/DESKTOP_MVP.md` for the current architecture and follow-up tasks.
+
 ## 1. Project Overview
 
 PaperTrail is a full-stack AI research assistant for computer science papers. It helps students upload academic PDFs, extract structured paper information, ask citation-grounded questions, compare papers, and generate reusable research notes.

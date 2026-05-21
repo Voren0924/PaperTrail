@@ -9,13 +9,10 @@ describe("storage keys", () => {
 
   it("generates scoped PDF storage keys", () => {
     const key = createPdfStorageKey({
-      userId: "user-1",
-      originalFileName: "My Paper.pdf",
-      fileSha256: "abcdef0123456789abcdef0123456789"
+      paperId: "paper-1",
+      originalFileName: "My Paper.pdf"
     });
 
-    expect(key).toMatch(
-      /^papers\/user-1\/\d{4}-\d{2}-\d{2}\/My-Paper-abcdef0123456789-[0-9a-f-]{36}\.pdf$/
-    );
+    expect(key).toBe("files/paper-1.pdf");
   });
 });

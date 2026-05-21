@@ -1,12 +1,10 @@
-import { requireCurrentUser } from "@/server/auth/current-user";
 import { BadRequestError } from "@/server/errors/application-error";
 import { jsonResponse, withApiErrors } from "@/server/http/api-response";
 import { createPaperService } from "@/server/papers/service";
 
 export async function GET() {
   return withApiErrors(async () => {
-    const currentUser = await requireCurrentUser();
-    const result = await createPaperService().listPapers({ currentUserId: currentUser.id });
+    const result = await createPaperService().listPapers();
 
     return jsonResponse(result);
   });
@@ -14,10 +12,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   return withApiErrors(async () => {
-    const currentUser = await requireCurrentUser();
     const formData = await readUploadFormData(request);
     const result = await createPaperService().uploadPaper({
-      currentUserId: currentUser.id,
       file: formData.get("file")
     });
 

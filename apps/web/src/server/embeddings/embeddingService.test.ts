@@ -5,7 +5,7 @@ import {
   createEmbeddingService,
   type EmbeddableChunk,
   type EmbeddingRepository,
-  vectorToSqlLiteral
+  vectorToJson
 } from "./embeddingService";
 
 describe("embedding service", () => {
@@ -23,8 +23,8 @@ describe("embedding service", () => {
     });
     expect(embedTexts).toHaveBeenCalledWith(["first chunk", "second chunk"]);
     expect(repository.stored).toEqual([
-      { chunkId: "chunk-1", model: "embedding-model", embedding: createEmbedding(0.1) },
-      { chunkId: "chunk-2", model: "embedding-model", embedding: createEmbedding(0.2) }
+      { chunkId: "chunk-1", provider: "openai-compatible", model: "embedding-model", embedding: createEmbedding(0.1) },
+      { chunkId: "chunk-2", provider: "openai-compatible", model: "embedding-model", embedding: createEmbedding(0.2) }
     ]);
     expect(repository.statuses.at(-1)).toEqual({
       status: "READY",
@@ -68,17 +68,17 @@ describe("embedding service", () => {
     await expect(service.embedPaper({ paperId: "paper-1" })).rejects.toThrow("dimension mismatch");
   });
 
-  it("formats pgvector literals without surrounding whitespace", () => {
-    expect(vectorToSqlLiteral([0.1, -0.2, 3])).toBe("[0.1,-0.2,3]");
+  it("formats vectors as compact JSON without surrounding whitespace", () => {
+    expect(vectorToJson([0.1, -0.2, 3])).toBe("[0.1,-0.2,3]");
   });
 });
 
 function createMemoryRepository(chunks: EmbeddableChunk[]): EmbeddingRepository & {
-  stored: Array<{ chunkId: string; model: string; embedding: number[] }>;
+  stored: Array<{ chunkId: string; provider: string; model: string; embedding: number[] }>;
   statuses: Array<{ status: string; message: string }>;
 } {
   const pendingChunks = [...chunks];
-  const stored: Array<{ chunkId: string; model: string; embedding: number[] }> = [];
+  const stored: Array<{ chunkId: string; provider: string; model: string; embedding: number[] }> = [];
   const statuses: Array<{ status: string; message: string }> = [];
 
   return {
