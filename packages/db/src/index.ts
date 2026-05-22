@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 import { PrismaClient } from "@prisma/client";
@@ -26,6 +27,10 @@ export function getPrismaClient(): PrismaClient {
   return prisma;
 }
 
+export function getDefaultAppDataDir(): string {
+  return resolve(getWorkspaceRoot(), ".data", "PaperTrail");
+}
+
 export type { PrismaClient };
 
 function ensureDefaultDatabaseUrl(): void {
@@ -33,9 +38,14 @@ function ensureDefaultDatabaseUrl(): void {
     return;
   }
 
-  const appDataDir = process.env.PAPERTRAIL_APP_DATA_DIR || resolve(process.cwd(), ".data", "PaperTrail");
+  const appDataDir =
+    process.env.PAPERTRAIL_APP_DATA_DIR || getDefaultAppDataDir();
   const databasePath = resolve(appDataDir, "papertrail.db");
 
   mkdirSync(dirname(databasePath), { recursive: true });
   process.env.DATABASE_URL = `file:${databasePath.replace(/\\/g, "/")}`;
+}
+
+function getWorkspaceRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 }

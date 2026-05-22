@@ -41,7 +41,7 @@ By default, local development data is stored under:
   logs/
 ```
 
-The app data directory can be overridden with `PAPERTRAIL_APP_DATA_DIR`. Prisma CLI commands can use `DATABASE_URL`; the runtime also creates a default SQLite URL when `DATABASE_URL` is not set.
+The app data directory can be overridden with `PAPERTRAIL_APP_DATA_DIR`. When `DATABASE_URL` is not set, the runtime creates a default SQLite URL that points at the repo-root `.data/PaperTrail/papertrail.db`, regardless of whether the process was started from the root workspace or `apps/web`.
 
 API keys are currently stored in the local SQLite settings table for this migration pass. Moving the API key into the OS credential store is planned for the Tauri packaging pass. Do not commit real API keys, `.env` files, uploaded PDFs, or `.data`.
 
@@ -62,6 +62,8 @@ STORAGE_DRIVER=local
 MAX_UPLOAD_MB=50
 WORKER_POLL_INTERVAL_MS=5000
 ```
+
+Use an absolute `PAPERTRAIL_APP_DATA_DIR` when setting it manually. Relative values are resolved by the current process, which can differ between Prisma CLI commands and filtered workspace scripts.
 
 Apply the local SQLite migration and generate Prisma:
 

@@ -42,6 +42,10 @@ export type EmbeddingRepository = {
   markPaperFailed(paperId: string, message: string): Promise<void>;
 };
 
+export type EmbeddingLogger = {
+  info(message: string, metadata?: Record<string, unknown>): void;
+};
+
 export type EmbedPaperInput = {
   paperId: string;
   batchSize?: number;
@@ -61,11 +65,23 @@ export class EmbeddingServiceError extends Error {
   }
 }
 
-export function createEmbeddingService(repository: EmbeddingRepository, provider: EmbeddingProvider) {
+export function createEmbeddingService(
+  repository: EmbeddingRepository,
+  provider: EmbeddingProvider,
+  logger: EmbeddingLogger = console
+) {
   return {
     async embedPaper(input: EmbedPaperInput): Promise<EmbedPaperResult> {
       const batchSize = normalizeBatchSize(input.batchSize);
-      await repository.markPaperEmbedding(input.paperId, "Embedding paper chunks.");
+      await repository.markPaperEmbedding(
+        input.paperId,
+        "Embedding paper chunks."
+      );
+      logger.info("worker document embedding started", {
+        documentId: input.paperId,
+        statusTransition: "EMBEDDING -> EMBEDDING",
+        embeddingModel: provider.model
+      });
 
       try {
         let embeddedChunkCount = 0;
@@ -78,7 +94,9 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
         });
 
         while (pendingChunks.length > 0) {
-          const providerResult = await provider.embedTexts(pendingChunks.map((chunk) => chunk.text));
+          const providerResult = await provider.embedTexts(
+            pendingChunks.map((chunk) => chunk.text)
+          );
 
           providerResult.embeddings.forEach((embedding) => {
             assertEmbeddingDimensions(embedding, provider.dimensions);
@@ -111,6 +129,13 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
             ? `Embedded ${embeddedChunkCount} paper chunks.`
             : "Paper chunks already have current embeddings."
         );
+        logger.info("worker document embedded", {
+          documentId: input.paperId,
+          statusTransition: "EMBEDDING -> READY",
+          embeddingCount: embeddedChunkCount,
+          skippedEmbeddingCount: 0,
+          embeddingModel: provider.model
+        });
 
         return {
           paperId: input.paperId,
@@ -121,15 +146,28 @@ export function createEmbeddingService(repository: EmbeddingRepository, provider
       } catch (error) {
         const message = getEmbeddingErrorMessage(error);
         await repository.markPaperFailed(input.paperId, message);
+        logger.info("worker document embedding failed", {
+          documentId: input.paperId,
+          statusTransition: "EMBEDDING -> FAILED",
+          embeddingCount: 0,
+          embeddingModel: provider.model,
+          errorMessage: message
+        });
         throw error instanceof EmbeddingServiceError
           ? error
-          : new EmbeddingServiceError(message, error instanceof Error ? { cause: error } : undefined);
+          : new EmbeddingServiceError(
+              message,
+              error instanceof Error ? { cause: error } : undefined
+            );
       }
     }
   };
 }
 
-export function createConfiguredEmbeddingService(prisma: PrismaClient) {
+export function createConfiguredEmbeddingService(
+  prisma: PrismaClient,
+  logger?: EmbeddingLogger
+) {
   const repository = createPrismaEmbeddingRepository(prisma);
   const settingsService = createSettingsService();
 
@@ -140,12 +178,16 @@ export function createConfiguredEmbeddingService(prisma: PrismaClient) {
         createEmbeddingProviderConfigFromSettings(settings)
       );
 
-      return createEmbeddingService(repository, provider).embedPaper(input);
+      return createEmbeddingService(repository, provider, logger).embedPaper(
+        input
+      );
     }
   };
 }
 
-export function createPrismaEmbeddingRepository(prisma: PrismaClient): EmbeddingRepository {
+export function createPrismaEmbeddingRepository(
+  prisma: PrismaClient
+): EmbeddingRepository {
   return {
     async findPendingPaperChunks(input) {
       return prisma.paperChunk.findMany({
@@ -237,11 +279,16 @@ function normalizeBatchSize(batchSize: number | undefined): number {
     return DEFAULT_EMBEDDING_BATCH_SIZE;
   }
 
-  return Number.isInteger(batchSize) && batchSize > 0 ? batchSize : DEFAULT_EMBEDDING_BATCH_SIZE;
+  return Number.isInteger(batchSize) && batchSize > 0
+    ? batchSize
+    : DEFAULT_EMBEDDING_BATCH_SIZE;
 }
 
 function getEmbeddingErrorMessage(error: unknown): string {
-  if (error instanceof EmbeddingProviderError || error instanceof EmbeddingServiceError) {
+  if (
+    error instanceof EmbeddingProviderError ||
+    error instanceof EmbeddingServiceError
+  ) {
     return error.message;
   }
 

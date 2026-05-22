@@ -1,7 +1,8 @@
 import path from "node:path";
 
+import { getDefaultAppDataDir } from "@papertrail/db";
+
 const defaultMaxUploadMb = 50;
-const defaultAppDataDir = path.join(".data", "PaperTrail");
 const defaultStorageDriver = "local";
 
 export type StorageConfig = {
@@ -18,25 +19,38 @@ export class StorageConfigurationError extends Error {
   }
 }
 
-export function getStorageConfig(env: Record<string, string | undefined> = process.env): StorageConfig {
+export function getStorageConfig(
+  env: Record<string, string | undefined> = process.env
+): StorageConfig {
   const driver = env.STORAGE_DRIVER?.trim() || defaultStorageDriver;
 
   if (driver !== defaultStorageDriver) {
-    throw new StorageConfigurationError(`Unsupported STORAGE_DRIVER: ${driver}.`);
+    throw new StorageConfigurationError(
+      `Unsupported STORAGE_DRIVER: ${driver}.`
+    );
   }
 
-  const maxUploadMb = parsePositiveInteger(env.MAX_UPLOAD_MB, defaultMaxUploadMb);
-  const localStorageDir = env.PAPERTRAIL_APP_DATA_DIR?.trim() || env.LOCAL_STORAGE_DIR?.trim() || defaultAppDataDir;
+  const maxUploadMb = parsePositiveInteger(
+    env.MAX_UPLOAD_MB,
+    defaultMaxUploadMb
+  );
+  const localStorageDir =
+    env.PAPERTRAIL_APP_DATA_DIR?.trim() || env.LOCAL_STORAGE_DIR?.trim();
 
   return {
     driver: defaultStorageDriver,
-    localStorageDir: path.resolve(process.cwd(), localStorageDir),
+    localStorageDir: localStorageDir
+      ? path.resolve(process.cwd(), localStorageDir)
+      : getDefaultAppDataDir(),
     maxUploadBytes: maxUploadMb * 1024 * 1024,
     maxUploadMb
   };
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number
+): number {
   if (!value) {
     return fallback;
   }

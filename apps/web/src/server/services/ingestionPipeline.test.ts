@@ -11,7 +11,12 @@ describe("ingestion pipeline", () => {
   it("persists parsed pages, sections, references, and chunks before enqueueing embeddings", async () => {
     const repository = createMemoryRepository();
     const pipeline = createIngestionPipeline(repository, {
-      readOriginalPdf: () => Promise.resolve(createMinimalPdf(repeatSentence("Reliable parser text.", 80)))
+      readOriginalPdf: () =>
+        Promise.resolve(
+          createPdfResult(
+            createMinimalPdf(repeatSentence("Reliable parser text.", 80))
+          )
+        )
     });
 
     await expect(pipeline.run({ paperId: "paper-1" })).resolves.toMatchObject({
@@ -32,10 +37,13 @@ describe("ingestion pipeline", () => {
   it("marks low-text PDFs failed instead of producing low-quality chunks", async () => {
     const repository = createMemoryRepository();
     const pipeline = createIngestionPipeline(repository, {
-      readOriginalPdf: () => Promise.resolve(createMinimalPdf("short"))
+      readOriginalPdf: () =>
+        Promise.resolve(createPdfResult(createMinimalPdf("short")))
     });
 
-    await expect(pipeline.run({ paperId: "paper-1" })).rejects.toThrow(UnsupportedPdfError);
+    await expect(pipeline.run({ paperId: "paper-1" })).rejects.toThrow(
+      UnsupportedPdfError
+    );
     expect(repository.persisted).toHaveLength(0);
     expect(repository.statuses.at(-1)).toMatchObject({
       status: "FAILED",
@@ -46,16 +54,48 @@ describe("ingestion pipeline", () => {
   it("marks unreadable PDFs failed with diagnostics", async () => {
     const repository = createMemoryRepository();
     const pipeline = createIngestionPipeline(repository, {
-      readOriginalPdf: () => Promise.resolve(Buffer.from("not a pdf"))
+      readOriginalPdf: () =>
+        Promise.resolve(createPdfResult(Buffer.from("not a pdf")))
     });
 
-    await expect(pipeline.run({ paperId: "paper-1" })).rejects.toThrow("Unable to read PDF text.");
+    await expect(pipeline.run({ paperId: "paper-1" })).rejects.toThrow(
+      "Unable to read PDF text."
+    );
     expect(repository.statuses.at(-1)).toMatchObject({
       status: "FAILED",
       message: "Unable to read PDF text."
     });
   });
+
+  it("marks missing PDF files failed instead of leaving the document processing", async () => {
+    const repository = createMemoryRepository();
+    const pipeline = createIngestionPipeline(repository, {
+      readOriginalPdf: () =>
+        Promise.resolve({
+          filePath: "D:\\PaperTrail\\.data\\PaperTrail\\missing.pdf",
+          fileExists: false,
+          fileSize: 0
+        })
+    });
+
+    await expect(pipeline.run({ paperId: "paper-1" })).rejects.toThrow(
+      "Original PDF file does not exist."
+    );
+    expect(repository.statuses.at(-1)).toMatchObject({
+      status: "FAILED",
+      message: "Original PDF file does not exist."
+    });
+  });
 });
+
+function createPdfResult(bytes: Buffer) {
+  return {
+    bytes,
+    filePath: "D:\\PaperTrail\\.data\\PaperTrail\\paper.pdf",
+    fileExists: true,
+    fileSize: bytes.length
+  };
+}
 
 function createMemoryRepository(): IngestionRepository & {
   persisted: PersistParsedPaperInput[];
@@ -83,7 +123,10 @@ function createMemoryRepository(): IngestionRepository & {
     },
     enqueueEmbeddingJob(paperId) {
       embeddingJobs.push(paperId);
-      statuses.push({ status: "EMBEDDING", message: "Queued paper chunks for embedding." });
+      statuses.push({
+        status: "EMBEDDING",
+        message: "Queued paper chunks for embedding."
+      });
       return Promise.resolve();
     },
     markPaperReady(_paperId, message) {
@@ -132,5 +175,8 @@ function repeatSentence(sentence: string, count: number): string {
 }
 
 function escapePdfText(text: string): string {
-  return text.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+  return text
+    .replaceAll("\\", "\\\\")
+    .replaceAll("(", "\\(")
+    .replaceAll(")", "\\)");
 }

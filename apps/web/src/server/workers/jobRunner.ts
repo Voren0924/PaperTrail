@@ -2,8 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@papertrail/db";
 
-import type { EmbedPaperInput, EmbedPaperResult } from "../embeddings/embeddingService";
-import type { RunIngestionPipelineInput, RunIngestionPipelineResult } from "../services/ingestionPipeline";
+import type {
+  EmbedPaperInput,
+  EmbedPaperResult
+} from "../embeddings/embeddingService";
+import type {
+  RunIngestionPipelineInput,
+  RunIngestionPipelineResult
+} from "../services/ingestionPipeline";
 
 export type IngestionJob = {
   id: string;
@@ -20,7 +26,11 @@ type IngestionJobType = "PARSE_PAPER" | "EMBED_PAPER" | "RETRY_PAPER";
 export type JobRunnerRepository = {
   claimNextJob(workerId: string, now: Date): Promise<IngestionJob | null>;
   markJobSucceeded(jobId: string, message: string, now: Date): Promise<void>;
-  markJobFailed(job: IngestionJob, errorMessage: string, now: Date): Promise<void>;
+  markJobFailed(
+    job: IngestionJob,
+    errorMessage: string,
+    now: Date
+  ): Promise<void>;
 };
 
 export type IngestionPipelineHandler = {
@@ -38,8 +48,31 @@ export type JobRunnerOptions = {
 
 export type RunNextJobResult =
   | { status: "idle" }
-  | { status: "succeeded"; jobId: string }
-  | { status: "failed"; jobId: string; errorMessage: string };
+  | {
+      status: "succeeded";
+      jobId: string;
+      jobType: IngestionJobType;
+      paperId: string;
+      message: string;
+      metrics: JobRunMetrics;
+    }
+  | {
+      status: "failed";
+      jobId: string;
+      jobType: IngestionJobType;
+      paperId: string | null;
+      errorMessage: string;
+    };
+
+export type JobRunMetrics = {
+  pageCount?: number;
+  parsedTextLength?: number;
+  chunkCount?: number;
+  referenceCount?: number;
+  embeddingCount?: number;
+  skippedEmbeddingCount?: number;
+  embeddingModel?: string;
+};
 
 export function createJobRunner(
   repository: JobRunnerRepository,
@@ -60,25 +93,41 @@ export function createJobRunner(
 
       try {
         const paperId = getPaperIdFromJob(job);
-        const message =
+        const outcome =
           job.type === "PARSE_PAPER" || job.type === "RETRY_PAPER"
             ? await runParseJob(ingestionPipeline, paperId)
             : await runEmbeddingJob(embeddingService, paperId);
-        await repository.markJobSucceeded(job.id, message, now());
+        await repository.markJobSucceeded(job.id, outcome.message, now());
 
-        return { status: "succeeded", jobId: job.id };
+        return {
+          status: "succeeded",
+          jobId: job.id,
+          jobType: job.type,
+          paperId,
+          message: outcome.message,
+          metrics: outcome.metrics
+        };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Ingestion job failed.";
+        const errorMessage =
+          error instanceof Error ? error.message : "Ingestion job failed.";
         await repository.markJobFailed(job, errorMessage, now());
 
-        return { status: "failed", jobId: job.id, errorMessage };
+        return {
+          status: "failed",
+          jobId: job.id,
+          jobType: job.type,
+          paperId: job.paperId,
+          errorMessage
+        };
       }
     },
     workerId
   };
 }
 
-export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunnerRepository {
+export function createPrismaJobRunnerRepository(
+  prisma: PrismaClient
+): JobRunnerRepository {
   return {
     async claimNextJob(workerId, now) {
       return prisma.$transaction(async (transaction) => {
@@ -125,7 +174,9 @@ export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunner
           claimedJob.type !== "RETRY_PAPER"
         ) {
           const unsupportedJob = claimedJob as { type: string };
-          throw new Error(`Unsupported worker job type: ${unsupportedJob.type}.`);
+          throw new Error(
+            `Unsupported worker job type: ${unsupportedJob.type}.`
+          );
         }
 
         return {
@@ -165,23 +216,46 @@ export function createPrismaJobRunnerRepository(prisma: PrismaClient): JobRunner
           lockedBy: null,
           lastHeartbeatAt: now,
           finishedAt: shouldRetry ? null : now,
-          runAfter: shouldRetry ? new Date(now.getTime() + getRetryDelayMs(job.attempts)) : now
+          runAfter: shouldRetry
+            ? new Date(now.getTime() + getRetryDelayMs(job.attempts))
+            : now
         }
       });
     }
   };
 }
 
-async function runParseJob(ingestionPipeline: IngestionPipelineHandler, paperId: string): Promise<string> {
+async function runParseJob(
+  ingestionPipeline: IngestionPipelineHandler,
+  paperId: string
+): Promise<{ message: string; metrics: JobRunMetrics }> {
   const result = await ingestionPipeline.run({ paperId });
 
-  return `Parsed ${result.pageCount} pages into ${result.chunkCount} chunks.`;
+  return {
+    message: `Parsed ${result.pageCount} pages into ${result.chunkCount} chunks.`,
+    metrics: {
+      pageCount: result.pageCount,
+      parsedTextLength: result.parsedTextLength,
+      chunkCount: result.chunkCount,
+      referenceCount: result.referenceCount
+    }
+  };
 }
 
-async function runEmbeddingJob(embeddingService: EmbeddingJobHandler, paperId: string): Promise<string> {
+async function runEmbeddingJob(
+  embeddingService: EmbeddingJobHandler,
+  paperId: string
+): Promise<{ message: string; metrics: JobRunMetrics }> {
   const result = await embeddingService.embedPaper({ paperId });
 
-  return `Embedded ${result.embeddedChunkCount} chunks with ${result.model}.`;
+  return {
+    message: `Embedded ${result.embeddedChunkCount} chunks with ${result.model}.`,
+    metrics: {
+      embeddingCount: result.embeddedChunkCount,
+      skippedEmbeddingCount: result.skippedChunkCount,
+      embeddingModel: result.model
+    }
+  };
 }
 
 function getPaperIdFromJob(job: IngestionJob): string {
@@ -196,7 +270,9 @@ function getPaperIdFromJob(job: IngestionJob): string {
   throw new Error("Ingestion job is missing paperId.");
 }
 
-function isPayloadWithPaperId(payload: unknown): payload is { paperId: string } {
+function isPayloadWithPaperId(
+  payload: unknown
+): payload is { paperId: string } {
   return (
     typeof payload === "object" &&
     payload !== null &&

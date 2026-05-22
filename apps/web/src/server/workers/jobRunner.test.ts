@@ -5,7 +5,10 @@ import {
   type IngestionJob,
   type JobRunnerRepository
 } from "./jobRunner";
-import type { EmbeddingJobHandler, IngestionPipelineHandler } from "./jobRunner";
+import type {
+  EmbeddingJobHandler,
+  IngestionPipelineHandler
+} from "./jobRunner";
 
 describe("job runner", () => {
   it("claims a queued ingestion job and records success", async () => {
@@ -13,26 +16,44 @@ describe("job runner", () => {
       createJob({ id: "job-1", paperId: "paper-1" })
     ]);
     const pipeline: IngestionPipelineHandler = {
-      run: (input) => Promise.resolve({
-        paperId: input.paperId,
-        pageCount: 2,
-        chunkCount: 3,
-        referenceCount: 1
-      })
+      run: (input) =>
+        Promise.resolve({
+          paperId: input.paperId,
+          pageCount: 2,
+          parsedTextLength: 1200,
+          chunkCount: 3,
+          referenceCount: 1
+        })
     };
-    const runner = createJobRunner(repository, pipeline, {
-      embedPaper: () => Promise.reject(new Error("should not embed"))
-    }, {
-      workerId: "worker-test",
-      now: () => new Date("2026-05-19T00:00:00.000Z")
-    });
+    const runner = createJobRunner(
+      repository,
+      pipeline,
+      {
+        embedPaper: () => Promise.reject(new Error("should not embed"))
+      },
+      {
+        workerId: "worker-test",
+        now: () => new Date("2026-05-19T00:00:00.000Z")
+      }
+    );
 
     await expect(runner.runNext()).resolves.toEqual({
       status: "succeeded",
-      jobId: "job-1"
+      jobId: "job-1",
+      jobType: "PARSE_PAPER",
+      paperId: "paper-1",
+      message: "Parsed 2 pages into 3 chunks.",
+      metrics: {
+        pageCount: 2,
+        parsedTextLength: 1200,
+        chunkCount: 3,
+        referenceCount: 1
+      }
     });
     expect(repository.events).toContain("claimed:job-1:worker-test");
-    expect(repository.events).toContain("succeeded:job-1:Parsed 2 pages into 3 chunks.");
+    expect(repository.events).toContain(
+      "succeeded:job-1:Parsed 2 pages into 3 chunks."
+    );
   });
 
   it("claims a queued embedding job and records success", async () => {
@@ -60,10 +81,20 @@ describe("job runner", () => {
 
     await expect(runner.runNext()).resolves.toEqual({
       status: "succeeded",
-      jobId: "job-1"
+      jobId: "job-1",
+      jobType: "EMBED_PAPER",
+      paperId: "paper-1",
+      message: "Embedded 4 chunks with text-embedding-3-small.",
+      metrics: {
+        embeddingCount: 4,
+        skippedEmbeddingCount: 0,
+        embeddingModel: "text-embedding-3-small"
+      }
     });
     expect(repository.events).toContain("claimed:job-1:worker-test");
-    expect(repository.events).toContain("succeeded:job-1:Embedded 4 chunks with text-embedding-3-small.");
+    expect(repository.events).toContain(
+      "succeeded:job-1:Embedded 4 chunks with text-embedding-3-small."
+    );
   });
 
   it("claims a queued retry job and reruns parsing", async () => {
@@ -71,12 +102,14 @@ describe("job runner", () => {
       createJob({ id: "job-1", paperId: "paper-1", type: "RETRY_PAPER" })
     ]);
     const pipeline: IngestionPipelineHandler = {
-      run: (input) => Promise.resolve({
-        paperId: input.paperId,
-        pageCount: 5,
-        chunkCount: 8,
-        referenceCount: 2
-      })
+      run: (input) =>
+        Promise.resolve({
+          paperId: input.paperId,
+          pageCount: 5,
+          parsedTextLength: 2400,
+          chunkCount: 8,
+          referenceCount: 2
+        })
     };
     const runner = createJobRunner(
       repository,
@@ -90,15 +123,31 @@ describe("job runner", () => {
 
     await expect(runner.runNext()).resolves.toEqual({
       status: "succeeded",
-      jobId: "job-1"
+      jobId: "job-1",
+      jobType: "RETRY_PAPER",
+      paperId: "paper-1",
+      message: "Parsed 5 pages into 8 chunks.",
+      metrics: {
+        pageCount: 5,
+        parsedTextLength: 2400,
+        chunkCount: 8,
+        referenceCount: 2
+      }
     });
     expect(repository.events).toContain("claimed:job-1:worker-test");
-    expect(repository.events).toContain("succeeded:job-1:Parsed 5 pages into 8 chunks.");
+    expect(repository.events).toContain(
+      "succeeded:job-1:Parsed 5 pages into 8 chunks."
+    );
   });
 
   it("records failure diagnostics when the ingestion pipeline fails", async () => {
     const repository = createMemoryJobRepository([
-      createJob({ id: "job-1", paperId: "paper-1", attempts: 3, maxAttempts: 3 })
+      createJob({
+        id: "job-1",
+        paperId: "paper-1",
+        attempts: 3,
+        maxAttempts: 3
+      })
     ]);
     const pipeline: IngestionPipelineHandler = {
       run: () => Promise.reject(new Error("parse failed"))
@@ -115,6 +164,8 @@ describe("job runner", () => {
     await expect(runner.runNext()).resolves.toEqual({
       status: "failed",
       jobId: "job-1",
+      jobType: "PARSE_PAPER",
+      paperId: "paper-1",
       errorMessage: "parse failed"
     });
     expect(repository.events).toContain("failed:job-1:parse failed");
@@ -131,13 +182,16 @@ describe("job runner", () => {
   });
 });
 
-function createMemoryJobRepository(jobs: IngestionJob[]): JobRunnerRepository & { events: string[] } {
+function createMemoryJobRepository(
+  jobs: IngestionJob[]
+): JobRunnerRepository & { events: string[] } {
   const events: string[] = [];
 
   return {
     events,
     claimNextJob(workerId) {
-      const job = jobs.find((candidate) => candidate.status === "QUEUED") ?? null;
+      const job =
+        jobs.find((candidate) => candidate.status === "QUEUED") ?? null;
 
       if (!job) {
         return Promise.resolve(null);

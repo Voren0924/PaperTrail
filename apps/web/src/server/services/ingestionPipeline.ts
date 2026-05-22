@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
 
-import type { PrismaClient } from "@papertrail/db";
+import { getDefaultAppDataDir, type PrismaClient } from "@papertrail/db";
 
 import { createPaperChunks, type PaperChunkInput } from "./chunkingService";
 import {
@@ -45,7 +45,18 @@ export type IngestionRepository = {
 };
 
 export type PdfStorageReader = {
-  readOriginalPdf(storageKey: string): Promise<Buffer>;
+  readOriginalPdf(storageKey: string): Promise<ReadOriginalPdfResult>;
+};
+
+export type ReadOriginalPdfResult = {
+  bytes?: Buffer;
+  filePath: string;
+  fileExists: boolean;
+  fileSize: number;
+};
+
+export type IngestionLogger = {
+  info(message: string, metadata?: Record<string, unknown>): void;
 };
 
 export type RunIngestionPipelineInput = {
@@ -55,6 +66,7 @@ export type RunIngestionPipelineInput = {
 export type RunIngestionPipelineResult = {
   paperId: string;
   pageCount: number;
+  parsedTextLength: number;
   chunkCount: number;
   referenceCount: number;
 };
@@ -75,11 +87,18 @@ export class UnsupportedPdfError extends IngestionPipelineError {
 
 export function createIngestionPipeline(
   repository: IngestionRepository,
-  storageReader: PdfStorageReader
+  storageReader: PdfStorageReader,
+  logger: IngestionLogger = console
 ) {
   return {
-    async run(input: RunIngestionPipelineInput): Promise<RunIngestionPipelineResult> {
-      await repository.markPaperParsing(input.paperId, "Parsing PDF and creating chunks.");
+    async run(
+      input: RunIngestionPipelineInput
+    ): Promise<RunIngestionPipelineResult> {
+      await repository.markPaperParsing(
+        input.paperId,
+        "Parsing PDF and creating chunks."
+      );
+      let pdfMetadata: Omit<ReadOriginalPdfResult, "bytes"> | null = null;
 
       try {
         const paper = await repository.findPaperForIngestion(input.paperId);
@@ -88,8 +107,23 @@ export function createIngestionPipeline(
           throw new IngestionPipelineError("Paper not found for ingestion.");
         }
 
-        const pdfBytes = await storageReader.readOriginalPdf(paper.storageKey);
-        const parsed = await parsePdfBytes(pdfBytes);
+        const pdf = await storageReader.readOriginalPdf(paper.storageKey);
+        pdfMetadata = {
+          filePath: pdf.filePath,
+          fileExists: pdf.fileExists,
+          fileSize: pdf.fileSize
+        };
+        logger.info("worker document input", {
+          documentId: input.paperId,
+          statusTransition: "UPLOADED/PARSING -> PARSING",
+          ...pdfMetadata
+        });
+
+        if (!pdf.bytes) {
+          throw new IngestionPipelineError("Original PDF file does not exist.");
+        }
+
+        const parsed = await parsePdfBytes(pdf.bytes);
         assertParsedPdfIsSupported(parsed);
 
         const chunks = createPaperChunks({
@@ -98,8 +132,20 @@ export function createIngestionPipeline(
         });
 
         if (chunks.length === 0) {
-          throw new UnsupportedPdfError("PDF did not produce any usable chunks.");
+          throw new UnsupportedPdfError(
+            "PDF did not produce any usable chunks."
+          );
         }
+
+        logger.info("worker document parsed", {
+          documentId: input.paperId,
+          statusTransition: "PARSING -> EMBEDDING",
+          filePath: pdf.filePath,
+          fileExists: pdf.fileExists,
+          fileSize: pdf.fileSize,
+          parsedTextLength: getParsedTextLength(parsed),
+          chunkCount: chunks.length
+        });
 
         await repository.persistParsedPaper({
           paperId: input.paperId,
@@ -115,19 +161,30 @@ export function createIngestionPipeline(
         return {
           paperId: input.paperId,
           pageCount: parsed.pageCount,
+          parsedTextLength: getParsedTextLength(parsed),
           chunkCount: chunks.length,
           referenceCount: parsed.references.length
         };
       } catch (error) {
         const message = getPipelineErrorMessage(error);
         await repository.markPaperFailed(input.paperId, message);
-        throw error instanceof IngestionPipelineError ? error : new IngestionPipelineError(message);
+        logger.info("worker document parsing failed", {
+          documentId: input.paperId,
+          statusTransition: "PARSING -> FAILED",
+          ...(pdfMetadata ?? {}),
+          errorMessage: message
+        });
+        throw error instanceof IngestionPipelineError
+          ? error
+          : new IngestionPipelineError(message);
       }
     }
   };
 }
 
-export function createPrismaIngestionRepository(prisma: PrismaClient): IngestionRepository {
+export function createPrismaIngestionRepository(
+  prisma: PrismaClient
+): IngestionRepository {
   return {
     async findPaperForIngestion(paperId) {
       const paper = await prisma.paper.findUnique({
@@ -148,11 +205,21 @@ export function createPrismaIngestionRepository(prisma: PrismaClient): Ingestion
     },
     async persistParsedPaper(input) {
       await prisma.$transaction(async (transaction) => {
-        await transaction.paperChunk.deleteMany({ where: { paperId: input.paperId } });
-        await transaction.paperReference.deleteMany({ where: { paperId: input.paperId } });
-        await transaction.paperSection.deleteMany({ where: { paperId: input.paperId } });
-        await transaction.paperPage.deleteMany({ where: { paperId: input.paperId } });
-        await transaction.paperAuthor.deleteMany({ where: { paperId: input.paperId } });
+        await transaction.paperChunk.deleteMany({
+          where: { paperId: input.paperId }
+        });
+        await transaction.paperReference.deleteMany({
+          where: { paperId: input.paperId }
+        });
+        await transaction.paperSection.deleteMany({
+          where: { paperId: input.paperId }
+        });
+        await transaction.paperPage.deleteMany({
+          where: { paperId: input.paperId }
+        });
+        await transaction.paperAuthor.deleteMany({
+          where: { paperId: input.paperId }
+        });
 
         await transaction.paper.update({
           where: { id: input.paperId },
@@ -275,7 +342,9 @@ export function createPrismaIngestionRepository(prisma: PrismaClient): Ingestion
 }
 
 export function createLocalPdfStorageReader(
-  baseDir = process.env.PAPERTRAIL_APP_DATA_DIR ?? process.env.LOCAL_STORAGE_DIR ?? ".data/PaperTrail"
+  baseDir = process.env.PAPERTRAIL_APP_DATA_DIR ??
+    process.env.LOCAL_STORAGE_DIR ??
+    getDefaultAppDataDir()
 ): PdfStorageReader {
   const root = resolve(baseDir);
 
@@ -284,13 +353,36 @@ export function createLocalPdfStorageReader(
       // TODO(Thread D): replace this with the storageService adapter once upload storage lands.
       const filePath = resolve(root, storageKey);
 
-      if (!filePath.startsWith(root)) {
-        throw new IngestionPipelineError("Storage key resolves outside the configured upload directory.");
+      const relativePath = relative(root, filePath);
+
+      if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+        throw new IngestionPipelineError(
+          "Storage key resolves outside the configured upload directory."
+        );
       }
 
-      return readFile(filePath);
+      const fileStats = await stat(filePath).catch(() => null);
+
+      if (!fileStats?.isFile()) {
+        return {
+          filePath,
+          fileExists: false,
+          fileSize: 0
+        };
+      }
+
+      return {
+        bytes: await readFile(filePath),
+        filePath,
+        fileExists: true,
+        fileSize: fileStats.size
+      };
     }
   };
+}
+
+function getParsedTextLength(parsed: ParsePdfResult): number {
+  return parsed.pages.reduce((total, page) => total + page.text.length, 0);
 }
 
 function assertParsedPdfIsSupported(parsed: ParsePdfResult): void {
@@ -299,12 +391,17 @@ function assertParsedPdfIsSupported(parsed: ParsePdfResult): void {
   }
 
   if (parsed.isLikelyScanned) {
-    throw new UnsupportedPdfError("PDF appears to be scanned or has too little extractable text.");
+    throw new UnsupportedPdfError(
+      "PDF appears to be scanned or has too little extractable text."
+    );
   }
 }
 
 function getPipelineErrorMessage(error: unknown): string {
-  if (error instanceof UnsupportedPdfError || error instanceof IngestionPipelineError) {
+  if (
+    error instanceof UnsupportedPdfError ||
+    error instanceof IngestionPipelineError
+  ) {
     return error.message;
   }
 
@@ -335,12 +432,17 @@ function deriveSectionRanges(sections: SectionCandidate[]): Array<{
   }));
 }
 
-function resolveSectionId(chunk: PaperChunkInput, sectionRecords: PersistedSection[]): string | null {
+function resolveSectionId(
+  chunk: PaperChunkInput,
+  sectionRecords: PersistedSection[]
+): string | null {
   if (!chunk.sectionNormalizedTitle) {
     return null;
   }
 
   return (
-    sectionRecords.find((section) => section.normalizedTitle === chunk.sectionNormalizedTitle)?.id ?? null
+    sectionRecords.find(
+      (section) => section.normalizedTitle === chunk.sectionNormalizedTitle
+    )?.id ?? null
   );
 }

@@ -1,6 +1,6 @@
 # Worker, PDF Parsing, And Chunking
 
-Desktop MVP update: the worker reads PDFs from the local app data directory (`PAPERTRAIL_APP_DATA_DIR`, default `.data/PaperTrail`) and uses provider settings saved in SQLite for embedding jobs. PostgreSQL and pgvector are no longer required for the MVP.
+Desktop MVP update: the worker reads PDFs from the local app data directory (`PAPERTRAIL_APP_DATA_DIR`, default repo-root `.data/PaperTrail`) and uses provider settings saved in SQLite for embedding jobs. PostgreSQL and pgvector are no longer required for the MVP.
 
 Thread E adds a local worker process that claims database-backed ingestion jobs, parses PDF text, creates deterministic chunks, and stores parser output for later retrieval work.
 
@@ -19,22 +19,18 @@ Run the worker as a separate development process:
 corepack pnpm worker
 ```
 
-Required environment:
+Optional environment:
 
 ```text
-DATABASE_URL=postgresql://...
+DATABASE_URL=file:../../../.data/PaperTrail/papertrail.db
+PAPERTRAIL_APP_DATA_DIR=D:\PaperTrail\.data\PaperTrail
 STORAGE_DRIVER=local
-LOCAL_STORAGE_DIR=.data/uploads
 WORKER_POLL_INTERVAL_MS=5000
-EMBEDDING_PROVIDER=openai-compatible
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-EMBEDDING_API_KEY=...
-EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_DIMENSIONS=1536
 ```
 
-`WORKER_POLL_INTERVAL_MS` is optional. `LOCAL_STORAGE_DIR` defaults to `.data/uploads`.
-Provider keys must be supplied only through local or deployment environment files.
+`DATABASE_URL` is optional at runtime. If it is unset, `@papertrail/db` points Prisma at the repo-root `.data/PaperTrail/papertrail.db` file and creates the directory. `PAPERTRAIL_APP_DATA_DIR` should be absolute when set manually so the web app, worker, and Prisma CLI do not diverge by working directory. Provider keys are saved from the local Settings screen and must not be committed.
+
+Prisma CLI commands do not reliably read a root `.env` when they are run from the `packages/db` workspace. Use the root scripts with an exported `DATABASE_URL`, or copy only local non-secret path settings into `packages/db/.env` if you need Prisma CLI dotenv loading.
 
 ## Job Behavior
 
@@ -42,6 +38,8 @@ Provider keys must be supplied only through local or deployment environment file
 - It claims one job at a time by moving it to `RUNNING`, incrementing `attempts`, and setting lock fields.
 - On success, the job is marked `SUCCEEDED`.
 - On failure, the job records an error message. Jobs with remaining attempts are re-queued with a short delay; exhausted jobs are marked `FAILED`.
+- Parsing and embedding failures also mark the paper `FAILED` with a visible status message so documents do not remain stuck in `PARSING` or `EMBEDDING`.
+- The worker logs startup, sanitized database target, poll interval, each polling cycle, document file metadata, parsed text length, chunk count, embedding count, and shutdown.
 - Redis, BullMQ, RabbitMQ, and other queue systems are intentionally not used for the MVP.
 
 ## Parsing And Chunking
@@ -54,5 +52,5 @@ Provider keys must be supplied only through local or deployment environment file
 - Chunks preserve page ranges, character offsets where feasible, page-local offsets, section labels, content hashes, and `chunkVersion`.
 - Chunks are first stored with `embeddingModel` set to `pending`.
 - After parsing, the ingestion pipeline enqueues `EMBED_PAPER` and marks the paper `EMBEDDING`.
-- The embedding job writes pgvector embeddings, updates chunk `embeddingModel`, and marks the paper `READY`.
+- The embedding job writes local JSON embeddings, updates chunk `embeddingModel`, and marks the paper `READY`.
 - `RETRY_PAPER` reruns parsing and chunking for the existing paper, then enqueues a fresh embedding job.
